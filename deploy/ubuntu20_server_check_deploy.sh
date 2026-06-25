@@ -259,7 +259,7 @@ prepare_venv() {
   PYTHON_BIN="${VENV_DIR}/bin/python"
   export PYTHON_BIN
   run "$PYTHON_BIN" -m pip install --upgrade pip
-  run "$PYTHON_BIN" -m pip install mavsdk websockets
+  run "$PYTHON_BIN" -m pip install -r "${MESH_DIR}/requirements.txt"
   check_platform_python
   log "use this in future shells:"
   log "  export PYTHON_BIN=${PYTHON_BIN}"

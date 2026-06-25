@@ -21,7 +21,7 @@ from mavsdk.offboard import OffboardError, VelocityBodyYawspeed
 
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_TOPOLOGY = SCRIPT_DIR / "topologies" / "wifi_adhoc_matrix_2x3_6uav.json"
+DEFAULT_TOPOLOGY = SCRIPT_DIR / "topology" / "wifi_adhoc_matrix_2x3_6uav.json"
 
 VALID_KEYS: Set[str] = {"w", "a", "s", "d", "q", "e", "z", "x", "c", "l", "h", "j", "k"}
 HOLD_KEYS: Set[str] = {"w", "a", "s", "d", "q", "e", "z", "x"}

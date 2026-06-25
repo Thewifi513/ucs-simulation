@@ -121,7 +121,7 @@ cd /path/to/ucs
 python3 -m venv --system-site-packages .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install mavsdk websockets
+python -m pip install -r ./ucs-simulation/requirements.txt
 python - <<'PY'
 import gz.transport13
 import gz.msgs10

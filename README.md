@@ -83,7 +83,7 @@ cd /path/to/ucs
 python3 -m venv --system-site-packages .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install mavsdk websockets
+python -m pip install -r ./ucs-simulation/requirements.txt
 python - <<'PY'
 import gz.transport13
 import gz.msgs10
@@ -319,3 +319,7 @@ ucs-p4runtime-sh:20260625
 ```
 
 P4Runtime 加载默认使用 `p4/build/` 下已存在的产物，不会自动编译。只有开发机需要用 `./p4/load_pipeline_observation.sh --compile`。
+
+## 许可证
+
+当前仓库保留所有权利，见 `LICENSE`。如需改为开源许可证，应先明确授权范围再替换该文件。
