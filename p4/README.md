@@ -1,0 +1,68 @@
+# P4/BMv2 模块
+
+本目录负责 P4 程序、编译产物和 P4Runtime 加载。它不创建 Linux 网络接口，只向已经启动的 BMv2 simple_switch_grpc 下发 pipeline 和表项。
+
+## 文件说明
+
+```text
+ucs_edge_cluster_route.p4                 当前 P4 源程序
+compile.sh                                使用固定 Docker 编译 P4，生成 BMv2 JSON 和 P4Info
+load_pipeline_observation.sh              通过观测网给 GS/UAV BMv2 加载 pipeline 和表项
+apply_cluster_heads.sh                    运行中更新 cluster-head 路由表项
+runtime_set_pipeline.py                   P4Runtime set_pipeline_config 工具
+cluster_head_entries.py                   根据拓扑生成 cluster-head P4Runtime 表项
+build/ucs_edge_cluster_route.json         已编译 BMv2 JSON
+build/ucs_edge_cluster_route.p4info.txt   已编译 P4Info
+```
+
+## 常用指令
+
+编译 P4：
+
+```bash
+./p4/compile.sh
+```
+
+只检查将要加载的目标：
+
+```bash
+./p4/load_pipeline_observation.sh --dry-run
+```
+
+加载所有 UAV 和 GS：
+
+```bash
+./p4/load_pipeline_observation.sh --include-gs --cluster-head-routes
+```
+
+只加载单架：
+
+```bash
+./p4/load_pipeline_observation.sh --target uav04 --cluster-head-routes
+```
+
+运行中切换 cluster head：
+
+```bash
+./p4/apply_cluster_heads.sh \
+  --topology ./topology/wifi_adhoc_matrix_2x3_6uav.json \
+  --cluster-heads 1:uav01,2:uav04
+```
+
+## 运行产物
+
+```text
+p4/build/ucs_edge_cluster_route.json
+p4/build/ucs_edge_cluster_route.p4info.txt
+p4/build/p4runtime_entries/*.json   live 加载时临时生成，可删除
+```
+
+服务器迁移默认携带 `p4/build/*.json` 和 `*.p4info.txt`，不在服务器现场编译。
+
+## 预留接口
+
+- 新 P4 表或 action 应先扩展 `ucs_edge_cluster_route.p4`，再扩展 `cluster_head_entries.py` 的表项生成逻辑。
+- `load_pipeline_observation.sh --target` 是单设备调试入口。
+- `--cluster-heads 1:uav01,2:uav04` 是当前 cluster-head 策略的外部控制接口。
+- `--compile` 可用于开发机自动重编译；服务器建议保持 `--no-compile` 和固定产物。
+- 新 BMv2 目标应先在拓扑 `programmable_net` 中声明 device id、grpc 地址和端口映射。

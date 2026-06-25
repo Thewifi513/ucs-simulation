@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ "${1:-}" == "--check" ]]; then
+  command -v gz
+  gz sim --versions 2>/dev/null || gz --versions 2>/dev/null || true
+  exit 0
+fi
+
+: "${PX4_DIR:?PX4_DIR is required}"
+: "${GZ_ENV_SH:?GZ_ENV_SH is required}"
+: "${WORLD_SDF:?WORLD_SDF is required}"
+: "${GZ_PARTITION:?GZ_PARTITION is required}"
+: "${GZ_IP:?GZ_IP is required}"
+
+[[ -d "$PX4_DIR" ]] || { echo "[gazebo-runtime][ERR] PX4_DIR not found: $PX4_DIR" >&2; exit 1; }
+[[ -f "$GZ_ENV_SH" ]] || { echo "[gazebo-runtime][ERR] GZ_ENV_SH not found: $GZ_ENV_SH" >&2; exit 1; }
+[[ -f "$WORLD_SDF" ]] || { echo "[gazebo-runtime][ERR] WORLD_SDF not found: $WORLD_SDF" >&2; exit 1; }
+
+UCS_INCOMING_GZ_SIM_SERVER_CONFIG_PATH="${GZ_SIM_SERVER_CONFIG_PATH:-}"
+UCS_INCOMING_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+UCS_INCOMING_GST_PLUGIN_PATH="${GST_PLUGIN_PATH:-}"
+UCS_INCOMING_GZ_SIM_RESOURCE_PATH="${GZ_SIM_RESOURCE_PATH:-}"
+UCS_GAZEBO_RESOURCE_PATH_PREFIX="${UCS_GAZEBO_RESOURCE_PATH_PREFIX:-}"
+UCS_GAZEBO_SOFTWARE_RENDER="${UCS_GAZEBO_SOFTWARE_RENDER:-1}"
+
+cd "$PX4_DIR"
+
+set +u
+source "$GZ_ENV_SH"
+set -u
+
+export GZ_PARTITION GZ_IP
+if [[ -n "$UCS_INCOMING_GZ_SIM_SERVER_CONFIG_PATH" ]]; then
+  export GZ_SIM_SERVER_CONFIG_PATH="$UCS_INCOMING_GZ_SIM_SERVER_CONFIG_PATH"
+fi
+if [[ -n "$UCS_INCOMING_LD_LIBRARY_PATH" ]]; then
+  export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}${UCS_INCOMING_LD_LIBRARY_PATH}"
+fi
+if [[ -n "$UCS_INCOMING_GST_PLUGIN_PATH" ]]; then
+  export GST_PLUGIN_PATH="${UCS_INCOMING_GST_PLUGIN_PATH}${GST_PLUGIN_PATH:+:${GST_PLUGIN_PATH}}"
+fi
+if [[ -n "$UCS_INCOMING_GZ_SIM_RESOURCE_PATH" ]]; then
+  export GZ_SIM_RESOURCE_PATH="${UCS_INCOMING_GZ_SIM_RESOURCE_PATH}${GZ_SIM_RESOURCE_PATH:+:${GZ_SIM_RESOURCE_PATH}}"
+fi
+if [[ -n "$UCS_GAZEBO_RESOURCE_PATH_PREFIX" ]]; then
+  export GZ_SIM_RESOURCE_PATH="${UCS_GAZEBO_RESOURCE_PATH_PREFIX}${GZ_SIM_RESOURCE_PATH:+:${GZ_SIM_RESOURCE_PATH}}"
+fi
+if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+  export XDG_RUNTIME_DIR="/tmp/xdg-runtime-${UID:-0}"
+  mkdir -p "$XDG_RUNTIME_DIR"
+  chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+fi
+
+case "$UCS_GAZEBO_SOFTWARE_RENDER" in
+  0|false|False|FALSE|no|No|NO|off|Off|OFF)
+    unset LIBGL_ALWAYS_SOFTWARE MESA_LOADER_DRIVER_OVERRIDE GALLIUM_DRIVER || true
+    ;;
+  *)
+    export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
+    export MESA_LOADER_DRIVER_OVERRIDE="${MESA_LOADER_DRIVER_OVERRIDE:-llvmpipe}"
+    export GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}"
+    ;;
+esac
+
+echo "[gazebo-runtime] PX4_DIR=$PX4_DIR"
+echo "[gazebo-runtime] WORLD_SDF=$WORLD_SDF"
+echo "[gazebo-runtime] GZ_PARTITION=$GZ_PARTITION"
+echo "[gazebo-runtime] GZ_IP=$GZ_IP"
+echo "[gazebo-runtime] GZ_SIM_SERVER_CONFIG_PATH=${GZ_SIM_SERVER_CONFIG_PATH:-}"
+echo "[gazebo-runtime] GZ_SIM_SYSTEM_PLUGIN_PATH=${GZ_SIM_SYSTEM_PLUGIN_PATH:-}"
+echo "[gazebo-runtime] GZ_SIM_RESOURCE_PATH=${GZ_SIM_RESOURCE_PATH:-}"
+echo "[gazebo-runtime] UCS_GAZEBO_SOFTWARE_RENDER=$UCS_GAZEBO_SOFTWARE_RENDER"
+echo "[gazebo-runtime] LIBGL_ALWAYS_SOFTWARE=${LIBGL_ALWAYS_SOFTWARE:-unset}"
+echo "[gazebo-runtime] __EGL_VENDOR_LIBRARY_FILENAMES=${__EGL_VENDOR_LIBRARY_FILENAMES:-unset}"
+echo "[gazebo-runtime] __GLX_VENDOR_LIBRARY_NAME=${__GLX_VENDOR_LIBRARY_NAME:-unset}"
+echo "[gazebo-runtime] GBM_BACKEND=${GBM_BACKEND:-unset}"
+echo "[gazebo-runtime] XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-}"
+
+exec gz sim -s -r --headless-rendering --render-engine-server "${GZ_RENDER_ENGINE:-ogre}" "$WORLD_SDF"

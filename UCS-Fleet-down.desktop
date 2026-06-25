@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=UCS BMv2 Fleet Down
+Comment=Stop UCS 6-UAV BMv2 fleet, browser control, video, dashboard, and helpers
+Exec=gnome-terminal -- /home/thewifi/Project/ucs/ucs-simulation/fleet/desktop_fleet_down.sh
+Path=/home/thewifi/Project/ucs/ucs-simulation
+Icon=/home/thewifi/Project/ucs/ucs-simulation/fleet/icons/ucs_fleet_icon_down.png
+Terminal=false
+Categories=Development;
+StartupNotify=true

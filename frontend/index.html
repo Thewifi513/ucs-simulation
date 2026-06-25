@@ -1,0 +1,2315 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UCS BMv2 Fleet Dashboard</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg-0: #07111f;
+      --bg-1: #0b1628;
+      --bg-2: #0f1f35;
+      --surface: rgba(17, 31, 52, 0.86);
+      --surface-2: rgba(25, 44, 70, 0.88);
+      --surface-3: rgba(35, 59, 91, 0.76);
+      --glass: rgba(255, 255, 255, 0.055);
+      --glass-strong: rgba(255, 255, 255, 0.095);
+      --line: rgba(137, 169, 201, 0.24);
+      --line-strong: rgba(153, 194, 229, 0.38);
+      --text: #ecf6ff;
+      --text-strong: #ffffff;
+      --muted: #93a9bd;
+      --muted-2: #687f94;
+      --ink: #08111e;
+      --good: #32d19b;
+      --good-2: #0f9f73;
+      --warn: #f5b84b;
+      --warn-2: #c68118;
+      --bad: #ff6b63;
+      --bad-2: #c43a31;
+      --stale: #7a8794;
+      --accent: #50b7ff;
+      --accent-2: #7c5cff;
+      --cyan: #26d7e7;
+      --video-bg: #030812;
+      --shadow-soft: 0 16px 48px rgba(0, 0, 0, 0.28);
+      --shadow-card: 0 12px 34px rgba(0, 0, 0, 0.24), inset 0 1px 0 rgba(255,255,255,0.06);
+      --topbar-h: 76px;
+      --radius-lg: 18px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html,
+    body { height: 100%; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      font-size: 14px;
+      background:
+        radial-gradient(circle at 18% 8%, rgba(80, 183, 255, 0.22), transparent 32%),
+        radial-gradient(circle at 74% 0%, rgba(124, 92, 255, 0.22), transparent 28%),
+        linear-gradient(145deg, var(--bg-0), var(--bg-1) 45%, #091323);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(rgba(255,255,255,0.024) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.018) 1px, transparent 1px);
+      background-size: 28px 28px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.65), transparent 78%);
+    }
+
+    button,
+    input,
+    select { font: inherit; }
+
+    button { -webkit-tap-highlight-color: transparent; }
+
+    .app {
+      position: relative;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      overflow: hidden;
+      padding: 12px;
+      gap: 12px;
+    }
+
+    .topbar {
+      min-height: var(--topbar-h);
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) auto;
+      align-items: center;
+      gap: 18px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: linear-gradient(135deg, rgba(17, 31, 52, 0.95), rgba(12, 24, 42, 0.88));
+      box-shadow: var(--shadow-soft), inset 0 1px 0 rgba(255,255,255,0.08);
+      backdrop-filter: blur(18px);
+      overflow: hidden;
+    }
+
+    .topbar::after {
+      content: "";
+      position: absolute;
+      right: 24px;
+      top: -42px;
+      width: 260px;
+      height: 120px;
+      background: radial-gradient(circle, rgba(80,183,255,0.18), transparent 70%);
+      pointer-events: none;
+    }
+
+    .title {
+      position: relative;
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+      padding-left: 50px;
+    }
+
+    .title::before {
+      content: "UCS";
+      position: absolute;
+      left: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 12px;
+      color: #07111f;
+      font-weight: 900;
+      font-size: 11px;
+      letter-spacing: .07em;
+      background: linear-gradient(135deg, var(--cyan), var(--accent));
+      box-shadow: 0 0 26px rgba(80,183,255,0.34);
+    }
+
+    .title strong {
+      display: block;
+      color: var(--text-strong);
+      font-size: clamp(18px, 1.45vw, 24px);
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+    }
+
+    .title span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .status-strip {
+      display: grid;
+      grid-auto-flow: column;
+      grid-auto-columns: max-content;
+      gap: 8px;
+      align-items: center;
+      justify-content: end;
+      position: relative;
+      z-index: 1;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      min-height: 34px;
+      padding: 0 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.055);
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
+    }
+
+    .pill b { color: var(--text); font-weight: 800; }
+
+    .dot,
+    .tab-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--stale);
+      box-shadow: 0 0 0 3px rgba(122,135,148,0.12);
+      flex: 0 0 auto;
+    }
+
+    .dot.good,
+    .tab-dot.good { background: var(--good); box-shadow: 0 0 0 3px rgba(50,209,155,0.14), 0 0 18px rgba(50,209,155,0.30); }
+    .dot.warn,
+    .tab-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px rgba(245,184,75,0.14), 0 0 18px rgba(245,184,75,0.24); }
+    .dot.bad,
+    .tab-dot.bad { background: var(--bad); box-shadow: 0 0 0 3px rgba(255,107,99,0.14), 0 0 18px rgba(255,107,99,0.24); }
+
+    .main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(560px, 1.24fr) minmax(430px, 0.96fr);
+      grid-template-rows: minmax(360px, 1.08fr) minmax(320px, 0.92fr);
+      grid-template-areas:
+        "world video"
+        "matrix control";
+      gap: 12px;
+      overflow: hidden;
+    }
+
+    .pane { display: contents; }
+
+    .section-world { grid-area: world; }
+    .section-video { grid-area: video; }
+    .section-matrix { grid-area: matrix; }
+    .section-control { grid-area: control; }
+
+    .section {
+      position: relative;
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: linear-gradient(180deg, var(--surface), rgba(12, 24, 42, 0.78));
+      box-shadow: var(--shadow-card);
+      overflow: hidden;
+      backdrop-filter: blur(16px);
+    }
+
+    .section::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(135deg, rgba(255,255,255,0.08), transparent 22%, transparent 72%, rgba(80,183,255,0.035));
+      opacity: 0.9;
+    }
+
+    .section-header {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 48px;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,0.035);
+    }
+
+    .section-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      color: var(--text-strong);
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: 0.02em;
+    }
+
+    .section-title::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 3px;
+      background: linear-gradient(135deg, var(--cyan), var(--accent-2));
+      box-shadow: 0 0 16px rgba(38,215,231,0.4);
+    }
+
+    .section-meta {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      text-align: right;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .world-wrap {
+      position: relative;
+      z-index: 1;
+      min-height: 0;
+      padding: 12px;
+      background: radial-gradient(circle at 50% 40%, rgba(80,183,255,0.10), transparent 62%);
+    }
+
+    #world-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 1px solid rgba(156, 198, 231, 0.26);
+      border-radius: 15px;
+      background: #091725;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.03), inset 0 24px 80px rgba(80,183,255,0.06);
+    }
+
+    .legend {
+      position: absolute;
+      left: 24px;
+      bottom: 24px;
+      display: flex;
+      gap: 9px;
+      flex-wrap: wrap;
+      max-width: calc(100% - 48px);
+      padding: 8px 10px;
+      border: 1px solid rgba(156, 198, 231, 0.22);
+      border-radius: 999px;
+      background: rgba(5, 12, 22, 0.68);
+      backdrop-filter: blur(12px);
+      color: var(--muted);
+      font-size: 11px;
+      box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+    }
+
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; }
+    .swatch { width: 20px; height: 6px; border-radius: 999px; background: var(--stale); }
+    .swatch.good { background: var(--good); }
+    .swatch.warn { background: var(--warn); }
+    .swatch.bad { background: var(--bad); }
+
+    .matrix-wrap {
+      position: relative;
+      z-index: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 10px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(147,169,189,0.5) transparent;
+    }
+
+    table.matrix {
+      width: 100%;
+      min-width: 720px;
+      height: 100%;
+      border-collapse: separate;
+      border-spacing: 6px;
+      table-layout: fixed;
+      font-size: 12px;
+    }
+
+    .matrix th,
+    .matrix td {
+      position: relative;
+      text-align: center;
+      vertical-align: middle;
+      padding: 0;
+      height: 46px;
+      border: 0;
+    }
+
+    .matrix th {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      height: 34px;
+      border: 1px solid rgba(156,198,231,0.15);
+      border-radius: 10px;
+      background: rgba(255,255,255,0.065);
+      color: var(--muted);
+      font-weight: 900;
+      backdrop-filter: blur(12px);
+    }
+
+    .matrix th:first-child { left: 0; z-index: 5; }
+
+    .matrix .row-head {
+      position: sticky;
+      left: 0;
+      z-index: 4;
+      background: rgba(255,255,255,0.065);
+      color: var(--muted);
+    }
+
+    .matrix .selected-axis {
+      color: var(--text-strong) !important;
+      border-color: rgba(80,183,255,0.40) !important;
+      background: rgba(80,183,255,0.12) !important;
+      box-shadow: 0 0 0 1px rgba(80,183,255,0.12) inset;
+    }
+
+    .matrix td.diag {
+      color: rgba(147,169,189,0.45);
+      background: rgba(255,255,255,0.03);
+      border-radius: 12px;
+    }
+
+    .cell {
+      min-height: 40px;
+      display: grid;
+      place-items: center;
+      border-radius: 13px;
+      border: 1px solid rgba(255,255,255,0.08);
+      font-weight: 900;
+      line-height: 1.05;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 8px 18px rgba(0,0,0,0.12);
+    }
+
+    .cell .per { font-size: 12px; letter-spacing: -0.01em; }
+    .cell small { display: block; margin-top: 3px; font-size: 10px; font-weight: 700; opacity: 0.78; }
+    .cell.good { background: linear-gradient(180deg, rgba(50,209,155,0.24), rgba(50,209,155,0.10)); color: #bfffe7; border-color: rgba(50,209,155,0.34); }
+    .cell.warn { background: linear-gradient(180deg, rgba(245,184,75,0.28), rgba(245,184,75,0.11)); color: #ffe1a2; border-color: rgba(245,184,75,0.38); }
+    .cell.bad { background: linear-gradient(180deg, rgba(255,107,99,0.30), rgba(255,107,99,0.11)); color: #ffd1ce; border-color: rgba(255,107,99,0.42); }
+    .cell.stale,
+    .cell.unknown { background: rgba(255,255,255,0.055); color: var(--muted); border-color: rgba(147,169,189,0.20); }
+
+    .section-video { background: linear-gradient(180deg, rgba(17,31,52,0.94), rgba(4,8,16,0.92)); }
+
+    .section-video .section-header { min-height: 52px; }
+
+    .uav-tabs {
+      min-width: 0;
+      display: flex;
+      gap: 7px;
+      overflow-x: auto;
+      padding: 2px 2px 3px;
+      scrollbar-width: none;
+    }
+
+    .uav-tabs::-webkit-scrollbar { display: none; }
+
+    .tab {
+      height: 32px;
+      min-width: 72px;
+      padding: 0 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 1px solid rgba(156,198,231,0.20);
+      border-radius: 999px;
+      background: rgba(255,255,255,0.055);
+      color: var(--muted);
+      cursor: pointer;
+      transition: transform .14s ease, border-color .14s ease, background .14s ease, color .14s ease;
+    }
+
+    .tab:hover { transform: translateY(-1px); border-color: rgba(80,183,255,0.45); color: var(--text); }
+    .tab.active { background: linear-gradient(135deg, rgba(80,183,255,0.24), rgba(124,92,255,0.20)); border-color: rgba(80,183,255,0.55); color: #fff; font-weight: 900; }
+
+    .video-body {
+      position: relative;
+      z-index: 1;
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(circle at center, rgba(80,183,255,0.10), transparent 62%),
+        linear-gradient(180deg, #040912, #02050b);
+      overflow: hidden;
+    }
+
+    .video-body::before {
+      content: "";
+      position: absolute;
+      inset: 12px;
+      border: 1px solid rgba(156,198,231,0.14);
+      border-radius: 16px;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    #video-frame {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      background: var(--video-bg);
+    }
+
+    .video-hud {
+      position: absolute;
+      left: 22px;
+      right: 22px;
+      top: 22px;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      pointer-events: none;
+      color: var(--text);
+      font-size: 12px;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+    }
+
+    .video-hud span {
+      min-width: 0;
+      max-width: 50%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      padding: 7px 10px;
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 999px;
+      background: rgba(3, 8, 18, 0.62);
+      backdrop-filter: blur(12px);
+    }
+
+    .video-empty {
+      position: absolute;
+      inset: 12px;
+      z-index: 2;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      text-align: center;
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(10,18,32,0.75), rgba(3,8,18,0.86));
+      color: var(--text);
+      pointer-events: none;
+    }
+
+    .video-empty strong { display: block; margin-bottom: 8px; font-size: 16px; color: #fff; }
+    .video-empty span { display: block; max-width: 360px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+    .control-body {
+      position: relative;
+      z-index: 1;
+      min-height: 0;
+      overflow: hidden;
+      padding: 10px;
+      display: grid;
+      grid-template-columns: minmax(220px, 0.92fr) minmax(260px, 1.08fr);
+      gap: 10px;
+      background: rgba(255,255,255,0.02);
+    }
+
+    .subpanel {
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+      border: 1px solid rgba(156,198,231,0.18);
+      border-radius: 15px;
+      background: rgba(255,255,255,0.052);
+      padding: 11px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+
+    .status-panel {
+      display: grid;
+      grid-template-rows: auto auto minmax(72px, 1fr);
+      align-content: stretch;
+    }
+
+    .subpanel h3 {
+      margin: 0 0 9px;
+      color: var(--text-strong);
+      font-size: 13px;
+      line-height: 1.2;
+      letter-spacing: 0.03em;
+    }
+
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .fact {
+      min-width: 0;
+      min-height: 44px;
+      padding: 7px 8px;
+      border: 1px solid rgba(156,198,231,0.14);
+      border-radius: 12px;
+      background: rgba(2,8,18,0.20);
+    }
+
+    .fact.wide { grid-column: 1 / -1; }
+    .fact span { display: block; color: var(--muted-2); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fact strong { display: block; margin-top: 5px; color: var(--text); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    #event-log {
+      margin: 9px 0 0;
+      height: auto;
+      min-height: 80px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.45;
+      color: #b8ccd9;
+      background: rgba(2,8,18,0.34);
+      border: 1px solid rgba(156,198,231,0.15);
+      border-radius: 12px;
+      padding: 8px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(147,169,189,0.48) transparent;
+    }
+
+    .control-connect {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 92px;
+      gap: 7px;
+      margin-bottom: 7px;
+    }
+
+    .connect-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 92px;
+      gap: 7px;
+      margin-bottom: 9px;
+    }
+
+    input[type="text"],
+    select {
+      min-width: 0;
+      height: 34px;
+      border: 1px solid rgba(156,198,231,0.22);
+      border-radius: 12px;
+      background: rgba(2,8,18,0.36);
+      color: var(--text);
+      padding: 0 11px;
+      outline: none;
+      transition: border-color .14s ease, box-shadow .14s ease, background .14s ease;
+    }
+
+    input[type="text"]:focus,
+    select:focus {
+      border-color: rgba(80,183,255,0.58);
+      box-shadow: 0 0 0 3px rgba(80,183,255,0.12);
+      background: rgba(2,8,18,0.52);
+    }
+
+    select option { color: #0b1628; background: #fff; }
+
+    .btn {
+      height: 34px;
+      min-width: 0;
+      padding: 0 9px;
+      border: 1px solid rgba(156,198,231,0.22);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.065);
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 900;
+      white-space: nowrap;
+      transition: transform .12s ease, border-color .12s ease, background .12s ease, box-shadow .12s ease;
+    }
+
+    .btn:hover { transform: translateY(-1px); border-color: rgba(80,183,255,0.48); background: rgba(255,255,255,0.095); }
+    .btn:active { transform: translateY(0); }
+    .btn.primary { border-color: rgba(80,183,255,0.55); background: linear-gradient(135deg, rgba(80,183,255,0.86), rgba(38,215,231,0.72)); color: #06111d; box-shadow: 0 10px 24px rgba(80,183,255,0.18); }
+    .btn.warn { border-color: rgba(245,184,75,0.55); background: rgba(245,184,75,0.84); color: #1e1201; }
+    .btn.bad { border-color: rgba(255,107,99,0.52); background: rgba(255,107,99,0.86); color: #1e0705; }
+
+    .key-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(34px, 1fr));
+      gap: 6px;
+      margin-top: 10px !important;
+    }
+
+    .key {
+      height: 42px;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      align-items: center;
+      justify-items: center;
+      border: 1px solid rgba(156,198,231,0.22);
+      border-radius: 13px;
+      background: rgba(2,8,18,0.26);
+      color: var(--text);
+      cursor: pointer;
+      user-select: none;
+      transition: transform .10s ease, border-color .10s ease, background .10s ease, box-shadow .10s ease;
+    }
+
+    .key:hover { border-color: rgba(80,183,255,0.45); background: rgba(80,183,255,0.10); }
+    .key b { font-size: 15px; line-height: 1; }
+    .key span { color: var(--muted); font-size: 10px; padding-bottom: 4px; font-weight: 700; }
+    .key.active { transform: translateY(1px); background: rgba(50,209,155,0.22); border-color: rgba(50,209,155,0.62); box-shadow: 0 0 0 3px rgba(50,209,155,0.10); }
+    .key.empty { visibility: hidden; }
+
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 6px;
+      margin-top: 9px;
+    }
+
+    .actions .btn { padding: 0 4px; font-size: 12px; }
+
+    .throttle-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) 50px;
+      gap: 8px;
+      align-items: center;
+      margin-top: 10px;
+      padding: 8px 9px;
+      border: 1px solid rgba(156,198,231,0.14);
+      border-radius: 13px;
+      background: rgba(2,8,18,0.20);
+    }
+
+    .throttle-row label { color: var(--muted); font-size: 12px; font-weight: 900; }
+    .throttle-row strong { color: var(--text); font-size: 12px; text-align: right; }
+    .throttle-row input[type="range"] { min-width: 0; accent-color: var(--accent); }
+
+
+
+    /* Second-pass UX refinements */
+    .section-title { font-size: 14px; letter-spacing: .02em; }
+    .section-meta { font-size: 12.5px; }
+
+    .matrix-header { min-height: 52px; align-items: center; }
+    .matrix-head-left { min-width: 0; display: flex; align-items: center; gap: 13px; }
+    .matrix-tabs { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid rgba(156,198,231,0.18); border-radius: 13px; background: rgba(2,8,18,0.28); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+    .matrix-tab { height: 28px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12.5px; font-weight: 900; white-space: nowrap; transition: background .12s ease, color .12s ease, box-shadow .12s ease; }
+    .matrix-tab:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+    .matrix-tab.active { color: #06111d; background: linear-gradient(135deg, rgba(80,183,255,0.92), rgba(38,215,231,0.82)); box-shadow: 0 10px 20px rgba(80,183,255,0.16); }
+
+    table.matrix { font-size: 12.5px; min-width: 650px; }
+    .matrix th, .matrix td { height: 46px; }
+    .cell { min-height: 34px; gap: 2px; }
+    .cell .per, .cell .metric-main { font-size: 13px; font-weight: 900; }
+    .cell small { font-size: 10.5px; }
+
+    .world-wrap { overflow: hidden; }
+    #world-canvas { cursor: grab; user-select: none; touch-action: none; }
+    #world-canvas.dragging { cursor: grabbing; }
+    .world-tools { position: absolute; top: 14px; right: 14px; display: inline-flex; gap: 5px; padding: 5px; border: 1px solid rgba(156,198,231,0.20); border-radius: 14px; background: rgba(6, 17, 32, 0.78); backdrop-filter: blur(12px); box-shadow: var(--shadow-card); }
+    .world-tools button { height: 30px; min-width: 32px; padding: 0 9px; border: 1px solid rgba(156,198,231,0.24); border-radius: 10px; background: rgba(255,255,255,0.08); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 900; }
+    .world-tools button:hover { border-color: rgba(80,183,255,0.48); background: rgba(80,183,255,0.14); }
+    .world-tools button:active { transform: translateY(1px); }
+    .world-hint { position: absolute; top: 54px; right: 14px; padding: 5px 8px; border: 1px solid rgba(156,198,231,0.14); border-radius: 10px; background: rgba(6, 17, 32, 0.62); color: var(--muted); font-size: 11px; pointer-events: none; backdrop-filter: blur(10px); }
+
+    .control-body { grid-template-columns: minmax(235px, 0.9fr) minmax(300px, 1.1fr); gap: 10px; }
+    .subpanel h3 { font-size: 14px; margin-bottom: 8px; }
+    .fact span { font-size: 10.8px; }
+    .fact strong { font-size: 12.5px; }
+    #event-log { font-size: 11.5px; }
+
+    .movement-pad { display: grid; grid-template-columns: minmax(0, 1fr) 64px; gap: 8px; align-items: stretch; margin-top: 10px; }
+    .move-keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+    .vertical-keys { display: grid; grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 7px; }
+    .key { height: 46px; grid-template-rows: auto auto; border-radius: 14px; padding: 5px 3px; }
+    .key.vertical { height: auto; }
+    .key b { font-size: 17px; }
+    .key span { font-size: 10.5px; padding-bottom: 0; }
+    .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 10px; }
+    .actions .btn { height: 34px; font-size: 12.5px; }
+    .throttle-row { grid-template-columns: auto minmax(0, 1fr) 52px; gap: 8px; margin-top: 10px; }
+    .throttle-hint { grid-column: 2 / -1; color: var(--muted); font-size: 11.5px; line-height: 1; text-align: right; }
+
+
+
+    /* Fourth-pass refinements: stretch Remote panel and fix plain left-drag pan */
+    .remote-panel {
+      display: grid;
+      grid-template-rows: auto auto auto minmax(150px, 1fr) auto auto;
+      align-content: stretch;
+      height: 100%;
+    }
+
+    .remote-panel .movement-pad {
+      min-height: 150px;
+      height: 100%;
+      align-self: stretch;
+      margin-top: 12px;
+    }
+
+    .remote-panel .move-keys {
+      grid-template-rows: repeat(2, minmax(64px, 1fr));
+      align-content: stretch;
+      height: 100%;
+    }
+
+    .remote-panel .vertical-keys {
+      grid-template-rows: repeat(2, minmax(64px, 1fr));
+      height: 100%;
+    }
+
+    .remote-panel .key {
+      height: auto;
+      min-height: 64px;
+    }
+
+    .remote-panel .actions {
+      margin-top: 12px;
+    }
+
+    .remote-panel .throttle-row {
+      margin-top: 12px;
+    }
+
+    #world-canvas {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+
+    .world-wrap.dragging #world-canvas,
+    #world-canvas.dragging {
+      cursor: grabbing;
+    }
+
+    body.world-dragging {
+      user-select: none;
+      cursor: grabbing;
+    }
+
+
+    /* Fifth-pass refinements: redesign Remote panel */
+    .remote-panel {
+      position: relative;
+      display: grid;
+      grid-template-rows: auto auto minmax(180px, 1fr) auto auto;
+      gap: 10px;
+      align-content: stretch;
+      height: 100%;
+      padding: 12px;
+      border-radius: 18px;
+      background:
+        radial-gradient(120% 120% at 0% 0%, rgba(80,183,255,0.10), transparent 42%),
+        radial-gradient(100% 120% at 100% 0%, rgba(38,215,231,0.08), transparent 35%),
+        linear-gradient(180deg, rgba(8,18,34,0.88), rgba(5,12,24,0.82));
+      border: 1px solid rgba(120, 177, 224, 0.22);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), 0 10px 30px rgba(2,10,20,0.22);
+    }
+    .remote-panel::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      border: 1px solid rgba(255,255,255,0.035);
+    }
+    .remote-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 2px;
+    }
+    .remote-head h3 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: 0.04em;
+    }
+    .remote-subtitle {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+    }
+    .remote-mini-badge {
+      align-self: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(156,198,231,0.18);
+      background: rgba(255,255,255,0.05);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    .remote-link-card,
+    .remote-actions-card,
+    .remote-deck {
+      border: 1px solid rgba(156,198,231,0.14);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(2,8,18,0.18));
+      padding: 10px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+    }
+    .remote-block-title {
+      margin-bottom: 9px;
+      color: var(--muted-2);
+      font-size: 10px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+    }
+    .remote-panel .control-connect {
+      grid-template-columns: minmax(0, 1fr) 96px;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .remote-panel .connect-grid {
+      grid-template-columns: minmax(0, 1fr) 92px;
+      gap: 8px;
+      margin-bottom: 0;
+      align-items: center;
+    }
+    .remote-ctrl-pill {
+      min-height: 36px;
+      border-radius: 12px;
+      justify-content: center;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(156,198,231,0.14);
+    }
+    .remote-panel .movement-pad {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 78px;
+      gap: 10px;
+      margin-top: 0;
+      min-height: 210px;
+      align-items: stretch;
+    }
+    .remote-panel .move-keys {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-rows: repeat(2, minmax(78px, 1fr));
+      gap: 8px;
+    }
+    .remote-panel .vertical-keys {
+      display: grid;
+      grid-template-rows: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .remote-panel .key {
+      position: relative;
+      min-height: 78px;
+      height: auto;
+      padding: 10px 8px 8px;
+      border-radius: 16px;
+      border: 1px solid rgba(114,173,224,0.20);
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03)),
+        linear-gradient(180deg, rgba(7,17,31,0.92), rgba(4,10,21,0.96));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -18px 24px rgba(0,0,0,0.18);
+      overflow: hidden;
+    }
+    .remote-panel .key::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(80,183,255,0.08), transparent 55%);
+      opacity: 0.9;
+      pointer-events: none;
+    }
+    .remote-panel .key:hover {
+      border-color: rgba(93,194,255,0.42);
+      background:
+        linear-gradient(180deg, rgba(80,183,255,0.12), rgba(255,255,255,0.04)),
+        linear-gradient(180deg, rgba(7,17,31,0.98), rgba(4,10,21,0.98));
+      box-shadow: 0 12px 24px rgba(80,183,255,0.12), inset 0 1px 0 rgba(255,255,255,0.05);
+      transform: translateY(-1px);
+    }
+    .remote-panel .key.active {
+      transform: translateY(1px);
+      border-color: rgba(50,209,155,0.65);
+      background:
+        linear-gradient(180deg, rgba(50,209,155,0.18), rgba(255,255,255,0.04)),
+        linear-gradient(180deg, rgba(7,17,31,0.98), rgba(4,10,21,0.98));
+      box-shadow: 0 0 0 3px rgba(50,209,155,0.10), 0 10px 22px rgba(50,209,155,0.10);
+    }
+    .remote-panel .key b {
+      position: relative;
+      z-index: 1;
+      font-size: 20px;
+      line-height: 1;
+      color: #eff7ff;
+    }
+    .remote-panel .key span {
+      position: relative;
+      z-index: 1;
+      margin-top: 6px;
+      color: #9db7cb;
+      font-size: 11px;
+      font-weight: 800;
+      line-height: 1.2;
+      text-align: center;
+      padding-bottom: 0;
+    }
+    .remote-panel .vertical-keys .key {
+      min-height: 0;
+      height: 100%;
+    }
+    .remote-panel .key-lift {
+      border-color: rgba(55,210,148,0.24);
+      background:
+        linear-gradient(180deg, rgba(55,210,148,0.10), rgba(255,255,255,0.035)),
+        linear-gradient(180deg, rgba(7,17,31,0.95), rgba(4,10,21,0.98));
+    }
+    .remote-panel .key-drop {
+      border-color: rgba(245,184,75,0.24);
+      background:
+        linear-gradient(180deg, rgba(245,184,75,0.10), rgba(255,255,255,0.035)),
+        linear-gradient(180deg, rgba(7,17,31,0.95), rgba(4,10,21,0.98));
+    }
+    .remote-panel .actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 0;
+    }
+    .remote-panel .actions .btn {
+      height: 38px;
+      border-radius: 13px;
+      font-size: 12.5px;
+      font-weight: 900;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+    .remote-panel .throttle-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) 52px;
+      gap: 10px;
+      align-items: center;
+      margin-top: 0;
+      padding: 10px 12px;
+      border-radius: 15px;
+      border: 1px solid rgba(156,198,231,0.16);
+      background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(2,8,18,0.16));
+    }
+    .remote-panel .throttle-row label {
+      color: var(--text-strong);
+      font-size: 12px;
+      letter-spacing: 0.03em;
+    }
+    .remote-panel .throttle-row strong {
+      font-size: 13px;
+      color: #dff1ff;
+    }
+    .remote-panel .throttle-hint {
+      grid-column: 2 / -1;
+      justify-self: end;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.02em;
+    }
+    .remote-panel input[type="text"],
+    .remote-panel select {
+      height: 36px;
+      border-radius: 12px;
+      background: rgba(3,9,18,0.44);
+    }
+
+
+    /* Sixth-pass refinements: compact Remote sizing without changing bindings */
+    .remote-panel {
+      grid-template-rows: auto auto minmax(158px, 1fr) auto auto;
+      gap: 8px;
+      padding: 10px;
+    }
+
+    .remote-head {
+      min-height: 30px;
+      align-items: center;
+    }
+
+    .remote-head h3 {
+      font-size: 14px;
+    }
+
+    .remote-subtitle {
+      margin-top: 2px;
+      font-size: 10.5px;
+    }
+
+    .remote-mini-badge {
+      padding: 5px 9px;
+      font-size: 10.5px;
+    }
+
+    .remote-link-card,
+    .remote-actions-card,
+    .remote-deck {
+      padding: 8px;
+      border-radius: 15px;
+    }
+
+    .remote-block-title {
+      margin-bottom: 7px;
+      font-size: 9.5px;
+      letter-spacing: 0.10em;
+    }
+
+    .remote-panel .control-connect {
+      grid-template-columns: minmax(0, 1fr) 88px;
+      gap: 7px;
+      margin-bottom: 7px;
+    }
+
+    .remote-panel .connect-grid {
+      grid-template-columns: minmax(0, 1fr) 88px;
+      gap: 7px;
+    }
+
+    .remote-panel input[type="text"],
+    .remote-panel select {
+      height: 32px;
+      border-radius: 11px;
+      font-size: 13px;
+    }
+
+    .remote-ctrl-pill {
+      min-height: 32px;
+      height: 32px;
+      font-size: 12px;
+    }
+
+    .remote-panel .connect-grid .btn {
+      height: 32px;
+      border-radius: 11px;
+    }
+
+    .remote-deck {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 154px;
+      align-items: stretch;
+    }
+
+    .remote-panel .movement-pad {
+      grid-template-columns: minmax(0, 1fr) 66px;
+      gap: 8px;
+      min-height: 0;
+      height: auto;
+      align-self: center;
+      margin-top: 0;
+    }
+
+    .remote-panel .move-keys {
+      grid-template-rows: repeat(2, 58px);
+      gap: 7px;
+      height: auto;
+      align-content: center;
+    }
+
+    .remote-panel .vertical-keys {
+      grid-template-rows: repeat(2, 58px);
+      gap: 7px;
+      height: auto;
+      align-content: center;
+    }
+
+    .remote-panel .key,
+    .remote-panel .vertical-keys .key {
+      min-height: 58px;
+      height: 58px;
+      padding: 7px 6px 6px;
+      border-radius: 14px;
+    }
+
+    .remote-panel .key b {
+      font-size: 17px;
+    }
+
+    .remote-panel .key span {
+      margin-top: 5px;
+      font-size: 10px;
+      line-height: 1.1;
+    }
+
+    .remote-panel .actions {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .remote-panel .actions .btn {
+      height: 32px;
+      border-radius: 12px;
+      font-size: 12px;
+    }
+
+    .remote-panel .throttle-row {
+      min-height: 38px;
+      padding: 8px 10px;
+      border-radius: 14px;
+      gap: 9px;
+    }
+
+    .remote-panel .throttle-hint {
+      font-size: 10.5px;
+    }
+
+    @media (min-width: 1201px) {
+      .remote-panel .remote-deck {
+        min-height: 164px;
+      }
+    }
+
+
+    @media (max-width: 1200px) {
+      .main {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: 420px 380px 330px auto;
+        grid-template-areas:
+          "world"
+          "video"
+          "matrix"
+          "control";
+        overflow: auto;
+        padding-right: 2px;
+      }
+      body,
+      .app { overflow: hidden; }
+      .control-body { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    }
+
+    @media (max-width: 780px) {
+      body { overflow: auto; }
+      .app { height: auto; min-height: 100vh; overflow: visible; padding: 8px; gap: 8px; }
+      .topbar { grid-template-columns: 1fr; min-height: auto; border-radius: 16px; }
+      .status-strip { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-content: stretch; }
+      .pill { justify-content: flex-start; min-width: 0; }
+      .main {
+        height: auto;
+        overflow: visible;
+        grid-template-rows: 360px 320px 310px auto;
+        gap: 8px;
+      }
+      .section { border-radius: 16px; }
+      .control-body { grid-template-columns: 1fr; }
+      .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .key-grid { grid-template-columns: repeat(3, minmax(48px, 1fr)); }
+      .key.empty { display: none; }
+      .control-connect,
+      .connect-grid { grid-template-columns: 1fr; }
+    }
+
+  </style>
+</head>
+<body>
+
+  <div class="app">
+    <header class="topbar">
+      <div class="title">
+        <strong>UCS BMv2 Fleet Dashboard</strong>
+        <span id="scenario-line">loading topology ...</span>
+      </div>
+      <div class="status-strip" aria-label="runtime status">
+        <span class="pill"><span id="dot-metrics" class="dot"></span>Metrics <b id="metrics-state">--</b></span>
+        <span class="pill"><span id="dot-ns3" class="dot"></span>ns-3 <b id="ns3-state">--</b></span>
+        <span class="pill"><span id="dot-links" class="dot"></span>Links <b id="links-state">--</b></span>
+        <span class="pill"><span id="dot-video" class="dot"></span>Video <b id="video-state">--</b></span>
+        <span class="pill"><span id="dot-ctrl-backend" class="dot"></span>Control <b id="ctrl-backend-state">--</b></span>
+      </div>
+    </header>
+
+    <main class="main">
+      <div class="pane left-pane">
+        <section class="section section-world">
+          <div class="section-header">
+            <div class="section-title">世界俯视图</div>
+            <div class="section-meta" id="world-meta">--</div>
+          </div>
+          <div class="world-wrap">
+            <canvas id="world-canvas"></canvas>
+            <div class="world-tools" aria-label="世界视图缩放控制">
+              <button type="button" id="world-zoom-out" title="缩小">−</button>
+              <button type="button" id="world-reset" title="重置视图">重置</button>
+              <button type="button" id="world-zoom-in" title="放大">＋</button>
+            </div>
+            <div class="world-hint">滚轮缩放 · 左键拖动平移</div>
+            <div class="legend">
+              <span class="legend-item"><span class="swatch good"></span>good</span>
+              <span class="legend-item"><span class="swatch warn"></span>warn</span>
+              <span class="legend-item"><span class="swatch bad"></span>bad</span>
+              <span class="legend-item"><span class="dot good"></span>cluster head</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="section section-matrix">
+          <div class="section-header matrix-header">
+            <div class="matrix-head-left">
+              <div class="section-title">链路状态矩阵</div>
+              <div class="matrix-tabs" role="tablist" aria-label="链路指标切换">
+                <button class="matrix-tab active" type="button" data-matrix-mode="distance">距离</button>
+                <button class="matrix-tab" type="button" data-matrix-mode="loss">链路丢弃</button>
+                <button class="matrix-tab" type="button" data-matrix-mode="jitter">抖动</button>
+              </div>
+            </div>
+            <div class="section-meta" id="matrix-meta">--</div>
+          </div>
+          <div class="matrix-wrap">
+            <table class="matrix" id="link-matrix"></table>
+          </div>
+        </section>
+      </div>
+
+      <div class="pane right-pane">
+        <section class="section section-video">
+          <div class="section-header">
+            <div class="uav-tabs" id="uav-tabs"></div>
+            <div class="section-meta" id="video-meta">--</div>
+          </div>
+          <div class="video-body">
+            <img id="video-frame" alt="UAV video">
+            <div class="video-hud">
+              <span id="video-uav-badge">uav--</span>
+              <span id="video-rx-badge">--</span>
+            </div>
+            <div class="video-empty" id="video-empty">
+              <div>
+                <strong>等待 RTP 视频</strong>
+                <span id="video-empty-text">选择无人机后从 GS 侧 UDP 端口拉取。</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section section-control">
+          <div class="section-header">
+            <div class="section-title">无人机状态 / 遥控面板</div>
+            <div class="section-meta" id="control-meta">--</div>
+          </div>
+          <div class="control-body">
+            <div class="subpanel status-panel">
+              <h3 id="uav-title">uav--</h3>
+              <div class="facts">
+                <div class="fact"><span>Container</span><strong id="fact-container">--</strong></div>
+                <div class="fact"><span>Experiment IP</span><strong id="fact-ip">--</strong></div>
+                <div class="fact"><span>QGC Port</span><strong id="fact-qgc">--</strong></div>
+                <div class="fact"><span>MAVSDK</span><strong id="fact-mavsdk">--</strong></div>
+                <div class="fact"><span>RTP Port</span><strong id="fact-rtp">--</strong></div>
+                <div class="fact"><span>Cluster</span><strong id="fact-cluster">--</strong></div>
+                <div class="fact"><span>Position</span><strong id="fact-position">--</strong></div>
+                <div class="fact"><span>Video Rx</span><strong id="fact-rx">--</strong></div>
+                <div class="fact"><span>Wi-Fi Tx/Rx</span><strong id="fact-wifi-txrx">--</strong></div>
+                <div class="fact"><span>Wi-Fi Drop</span><strong id="fact-wifi-drop">--</strong></div>
+                <div class="fact"><span>Wi-Fi Retry</span><strong id="fact-wifi-retry">--</strong></div>
+              </div>
+              <pre id="event-log"></pre>
+            </div>
+
+            <div class="subpanel remote-panel">
+              <div class="remote-head">
+                <div>
+                  <h3>Remote</h3>
+                  <div class="remote-subtitle">WS relay · keyboard / click control</div>
+                </div>
+                <div class="remote-mini-badge">QWE / ASD · Z X</div>
+              </div>
+
+              <div class="remote-link-card">
+                <div class="remote-block-title">连接设置</div>
+                <div class="control-connect">
+                  <input id="control-ws" type="text" spellcheck="false" value="">
+                  <select id="control-protocol">
+                    <option value="relay">relay</option>
+                    <option value="legacy">legacy</option>
+                  </select>
+                </div>
+                <div class="connect-grid">
+                  <span class="pill remote-ctrl-pill"><span id="dot-control" class="dot"></span><b id="control-state">disconnected</b></span>
+                  <button class="btn primary" id="btn-connect">连接</button>
+                </div>
+              </div>
+
+              <div class="remote-deck">
+                <div class="remote-block-title">飞行控制</div>
+                <div class="movement-pad" aria-label="飞行控制键位">
+                  <div class="move-keys">
+                    <button class="key" data-key="q"><b>↶</b><span>Q 偏航左</span></button>
+                    <button class="key" data-key="w"><b>↑</b><span>W 前进</span></button>
+                    <button class="key" data-key="e"><b>↷</b><span>E 偏航右</span></button>
+                    <button class="key" data-key="a"><b>←</b><span>A 左移</span></button>
+                    <button class="key" data-key="s"><b>↓</b><span>S 后退</span></button>
+                    <button class="key" data-key="d"><b>→</b><span>D 右移</span></button>
+                  </div>
+                  <div class="vertical-keys">
+                    <button class="key vertical key-lift" data-key="z"><b>升</b><span>Z 上升</span></button>
+                    <button class="key vertical key-drop" data-key="x"><b>降</b><span>X 下降</span></button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="remote-actions-card">
+                <div class="remote-block-title">任务动作</div>
+                <div class="actions">
+                  <button class="btn primary" id="btn-arm">解锁</button>
+                  <button class="btn warn" id="btn-land">降落</button>
+                  <button class="btn bad" id="btn-rtl">返航</button>
+                  <button class="btn" id="btn-sync">同步</button>
+                  <button class="btn" id="btn-release">释放</button>
+                  <button class="btn bad" id="btn-stop">急停</button>
+                </div>
+              </div>
+
+              <div class="throttle-row">
+                <label for="throttle">Speed</label>
+                <input id="throttle" type="range" min="0.05" max="1" step="0.05" value="0.30">
+                <strong id="throttle-text">0.30</strong>
+                <span class="throttle-hint">J / K 微调速度</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const ids = ['gs', 'uav01', 'uav02', 'uav03', 'uav04', 'uav05', 'uav06'];
+    const holdKeys = new Set(['w', 'a', 's', 'd', 'q', 'e', 'z', 'x']);
+    const pulseKeys = new Set(['c', 'l', 'h', 'j', 'k']);
+    const clusterHeads = new Set(['uav01', 'uav04']);
+    const activeKeys = new Set();
+    const el = (id) => document.getElementById(id);
+    let selectedUav = localStorage.getItem('ucs.selectedUav') || 'uav04';
+    let matrixMode = localStorage.getItem('ucs.matrixMode') || 'distance';
+    let state = null;
+    let controlWs = null;
+    let controlWsTarget = '';
+    let defaultControlWs = '';
+    const controlWsUrlParam = new URLSearchParams(location.search).get('control_ws')
+      || new URLSearchParams(location.search).get('controlWs')
+      || '';
+    const controlWsPinnedByUrl = Boolean(controlWsUrlParam);
+    let manualControlWs = controlWsUrlParam || '';
+    if (controlWsUrlParam) localStorage.setItem('ucs.controlWs', controlWsUrlParam);
+    else localStorage.removeItem('ucs.controlWs');
+    let configLoaded = false;
+    let worldView = {zoom: 1, panX: 0, panY: 0};
+    let worldDrag = null;
+    let lastWorldFrame = null;
+    const STATE_REFRESH_MS = 100;
+    let stateRefreshInFlight = false;
+    let lastUavTabsSignature = '';
+
+    function statusClass(status) {
+      if (status === 'good') return 'good';
+      if (status === 'warn' || status === 'stale') return 'warn';
+      if (status === 'bad') return 'bad';
+      return '';
+    }
+
+    function setDot(id, status) {
+      const node = el(id);
+      node.classList.remove('good', 'warn', 'bad');
+      const cls = statusClass(status);
+      if (cls) node.classList.add(cls);
+    }
+
+    function fmt(value, digits = 1, suffix = '') {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
+      return `${Number(value).toFixed(digits)}${suffix}`;
+    }
+
+    function ipShort(value) {
+      return String(value || '--').replace('/24', '');
+    }
+
+    function escapeHtml(value) {
+      const map = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
+      return String(value ?? '').replace(/[&<>"']/g, (ch) => map[ch]);
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replace(/\n/g, '&#10;');
+    }
+
+    function appendLog(text) {
+      const box = el('event-log');
+      const ts = new Date().toLocaleTimeString();
+      box.textContent += `[${ts}] ${text}\n`;
+      const lines = box.textContent.split('\n');
+      if (lines.length > 80) box.textContent = lines.slice(lines.length - 80).join('\n');
+      box.scrollTop = box.scrollHeight;
+    }
+
+    async function loadConfig() {
+      if (configLoaded) return;
+      const res = await fetch('/api/config', {cache: 'no-store'});
+      const cfg = await res.json();
+      defaultControlWs = cfg.control_ws ? normalizeControlWs(cfg.control_ws) : '';
+      if (!el('control-ws').value) el('control-ws').value = manualControlWs || defaultControlWs;
+      el('control-protocol').value = localStorage.getItem('ucs.controlProtocol') || cfg.control_protocol || 'relay';
+      configLoaded = true;
+    }
+
+    function normalizeControlWs(raw) {
+      const fallback = '';
+      if (!raw) return fallback;
+      try {
+        const url = new URL(raw);
+        const pageHost = location.hostname;
+        const localNames = new Set(['127.0.0.1', 'localhost', '::1']);
+        if (!localNames.has(pageHost) && localNames.has(url.hostname)) {
+          url.hostname = pageHost;
+        }
+        return url.toString();
+      } catch {
+        return fallback;
+      }
+    }
+
+    async function refreshState() {
+      if (stateRefreshInFlight) return;
+      stateRefreshInFlight = true;
+      try {
+        await loadConfig();
+        const res = await fetch('/api/state', {cache: 'no-store'});
+        state = await res.json();
+        renderAll();
+      } catch (err) {
+        appendLog(`state error: ${err}`);
+      } finally {
+        stateRefreshInFlight = false;
+      }
+    }
+
+    function nodeById(id) {
+      return (state?.nodes || []).find((node) => node.id === id);
+    }
+
+    function controlUrlForNode(node) {
+      if (node?.control_ws) return normalizeControlWs(node.control_ws);
+      if (node?.control_relay_port) return `ws://${location.hostname}:${node.control_relay_port}`;
+      return defaultControlWs || '';
+    }
+
+    function controlWsIsActive() {
+      return controlWs && (controlWs.readyState === WebSocket.OPEN || controlWs.readyState === WebSocket.CONNECTING);
+    }
+
+    function clearManualControlWs() {
+      if (controlWsPinnedByUrl) return;
+      manualControlWs = '';
+      localStorage.removeItem('ucs.controlWs');
+    }
+
+    function syncControlEndpoint(options = {}) {
+      const force = Boolean(options.force);
+      const node = nodeById(selectedUav);
+      const url = controlUrlForNode(node);
+      if (!url) return;
+      if (manualControlWs && el('control-ws').value.trim() && !force) return;
+      if (force || !controlWs || controlWs.readyState === WebSocket.CLOSING || controlWs.readyState === WebSocket.CLOSED) {
+        el('control-ws').value = url;
+      }
+    }
+
+    function linkByPair(a, b) {
+      const links = state?.links || [];
+      return links.find((link) => (link.src === a && link.dst === b) || (link.src === b && link.dst === a));
+    }
+
+    function pairKey(a, b) {
+      return [String(a), String(b)].sort().join('::');
+    }
+
+    function clusterHeadMap() {
+      const configured = state?.topology?.programmable_routing?.cluster_heads || {};
+      const heads = new Map();
+      Object.entries(configured).forEach(([clusterId, uavId]) => {
+        if (uavId) heads.set(String(clusterId), String(uavId));
+      });
+      if (heads.size === 0) {
+        clusterHeads.forEach((id) => {
+          const node = nodeById(id);
+          if (node?.cluster_id !== undefined && node?.cluster_id !== null) {
+            heads.set(String(node.cluster_id), id);
+          }
+        });
+      }
+      return heads;
+    }
+
+    function clusterHeadFor(node) {
+      if (!node || node.cluster_id === undefined || node.cluster_id === null) return '';
+      return clusterHeadMap().get(String(node.cluster_id)) || '';
+    }
+
+    function clusterHeadIdSet() {
+      return new Set(clusterHeadMap().values());
+    }
+
+    function isGroundToUav(src, dst) {
+      return (src?.type === 'ground_station' && dst?.type === 'uav') || (src?.type === 'uav' && dst?.type === 'ground_station');
+    }
+
+    function isIntraClusterUav(src, dst) {
+      return src?.type === 'uav' && dst?.type === 'uav'
+        && src.cluster_id !== undefined && src.cluster_id !== null
+        && String(src.cluster_id) === String(dst.cluster_id);
+    }
+
+    function isWorldTopologyLink(link) {
+      const src = nodeById(link.src);
+      const dst = nodeById(link.dst);
+      return Boolean(src?.position && dst?.position && (isGroundToUav(src, dst) || isIntraClusterUav(src, dst)));
+    }
+
+    function activeRouteKeys(targetUav = selectedUav) {
+      const selected = nodeById(targetUav);
+      const gs = (state?.nodes || []).find((node) => node.type === 'ground_station');
+      const keys = new Set();
+      if (!selected || selected.type !== 'uav' || !gs) return keys;
+      const headId = clusterHeadFor(selected) || selected.id;
+      if (headId && nodeById(headId)) {
+        keys.add(pairKey(gs.id, headId));
+        if (headId !== selected.id) keys.add(pairKey(headId, selected.id));
+      } else {
+        keys.add(pairKey(gs.id, selected.id));
+      }
+      return keys;
+    }
+
+    function inactiveRouteKeys() {
+      const keys = new Set();
+      (state?.nodes || [])
+        .filter((node) => node.type === 'uav' && node.id !== selectedUav)
+        .forEach((node) => {
+          activeRouteKeys(node.id).forEach((key) => keys.add(key));
+        });
+      return keys;
+    }
+
+    function pctText(value) {
+      if (value === null || value === undefined || Number.isNaN(Number(value))) return '--';
+      const pct = Number(value) * 100;
+      const abs = Math.abs(pct);
+      if (abs === 0) return '0%';
+      if (abs >= 10) return `${pct.toFixed(1)}%`;
+      if (abs >= 0.1) return `${pct.toFixed(2)}%`;
+      if (abs >= 0.001) return `${pct.toFixed(3)}%`;
+      return `${pct < 0 ? '-' : ''}<0.001%`;
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function firstNumber(source, keys) {
+      for (const key of keys) {
+        const value = source?.[key];
+        if (value !== null && value !== undefined && Number.isFinite(Number(value))) return Number(value);
+      }
+      return null;
+    }
+
+    function linkJitterMs(link) {
+      return firstNumber(link, ['jitter_ms', 'current_jitter_ms', 'delay_jitter_ms', 'mobility_jitter_ms', 'jitter', 'delay_jitter']);
+    }
+
+    function renderMatrixTabs() {
+      document.querySelectorAll('.matrix-tab[data-matrix-mode]').forEach((node) => {
+        node.classList.toggle('active', node.dataset.matrixMode === matrixMode);
+        if (node.dataset.matrixMode === 'loss') {
+          node.textContent = isNativeWifiMode() ? 'Wi-Fi判决' : '链路丢弃';
+        }
+      });
+    }
+
+    function isNativeWifiMode() {
+      return state?.topology?.impairment_policy === 'ns3_wifi_ad_hoc';
+    }
+
+    function matrixMetric(link) {
+      const per = link.post_mac_drop === null || link.post_mac_drop === undefined ? (link.per === null || link.per === undefined ? '--' : pctText(link.per)) : pctText(link.post_mac_drop);
+      const phyPer = link.phy_per === null || link.phy_per === undefined ? '--' : pctText(link.phy_per);
+      const observed = link.mac_delivery_loss === null || link.mac_delivery_loss === undefined ? '' : `obs ${pctText(link.mac_delivery_loss)}`;
+      const dist = link.distance_m === null || link.distance_m === undefined ? '--' : fmt(link.distance_m, 1, 'm');
+      const rx = link.rx_dbm === null || link.rx_dbm === undefined ? '--' : fmt(link.rx_dbm, 1, 'dBm');
+      const jitterMs = linkJitterMs(link);
+      const jitter = jitterMs === null ? '--' : fmt(jitterMs, 2, 'ms');
+      if (matrixMode === 'loss') {
+        if (isNativeWifiMode() || link.loss_delegated) {
+          return {main: rx, sub: 'drop ns-3', label: 'Native Wi-Fi drop authority'};
+        }
+        return {main: per, sub: phyPer === '--' ? observed : `PHY ${phyPer}${observed ? ` · ${observed}` : ''}`, label: 'prior MAC drop'};
+      }
+      if (matrixMode === 'jitter') {
+        return {main: jitter, sub: '', label: 'jitter'};
+      }
+      return {main: dist, sub: '', label: 'distance'};
+    }
+
+    function renderTopStatus() {
+      const topo = state.topology || {};
+      const rt = state.runtime || {};
+      const receivers = state.video_proxy?.receivers || [];
+      const videoBad = receivers.filter((item) => item.status === 'bad').length;
+      const videoWarn = receivers.filter((item) => item.status === 'warn').length;
+      const linkModelText = topo.link_model_display || topo.link_model || '--';
+      el('scenario-line').textContent = `${topo.scenario_id} · ${topo.world} · ${linkModelText}`;
+      el('world-meta').textContent = `${topo.world_sdf || topo.world || '--'} · sim=${fmt(rt.sim_time, 1, 's')}`;
+      const matrixLabel = matrixMode === 'loss'
+        ? (isNativeWifiMode() ? 'native ns-3 Wi-Fi owns final drop · showing rx/channel diagnostics' : 'current prior MAC drop / PHY single-attempt PER / observed cumulative in tooltip')
+        : (matrixMode === 'jitter' ? '抖动 jitter' : '距离 distance');
+      el('matrix-meta').textContent = `${matrixLabel} · good ${state.link_status_counts.good || 0} · warn ${state.link_status_counts.warn || 0} · stale ${state.link_status_counts.stale || 0} · bad ${state.link_status_counts.bad || 0}`;
+      el('metrics-state').textContent = rt.metrics_alive ? 'alive' : 'down';
+      el('ns3-state').textContent = rt.ns3_alive ? 'alive' : 'down';
+      el('links-state').textContent = `${state.link_status_counts.bad || 0} bad · ${state.link_status_counts.stale || 0} stale`;
+      el('video-state').textContent = `${rt.rtp_processes || 0} proc${receivers.length ? ` · ${videoBad} bad ${videoWarn} warn` : ''}`;
+      const ctrlBackendUp = Boolean(rt.control_ws_open);
+      const ctrlCount = Number(rt.control_relay_count || (ctrlBackendUp ? 1 : 0));
+      el('ctrl-backend-state').textContent = ctrlBackendUp ? `${ctrlCount} ws up` : 'ws down';
+      setDot('dot-metrics', rt.metrics_alive ? 'good' : 'warn');
+      setDot('dot-ns3', rt.ns3_alive ? 'good' : 'warn');
+      setDot('dot-links', (state.link_status_counts.bad || 0) > 0 ? 'bad' : (((state.link_status_counts.warn || 0) > 0 || (state.link_status_counts.stale || 0) > 0) ? 'warn' : 'good'));
+      setDot('dot-video', videoBad > 0 ? 'bad' : (videoWarn > 0 ? 'warn' : ((rt.rtp_processes || 0) > 0 ? 'good' : 'warn')));
+      setDot('dot-ctrl-backend', ctrlBackendUp ? 'good' : 'bad');
+    }
+
+    function renderTabs() {
+      const uavNodes = (state.nodes || []).filter((node) => node.type === 'uav');
+      const signature = uavNodes.map((node) => {
+        const cs = node.container_status || {};
+        return `${node.id}:${cs.running ? 1 : 0}:${node.rtp_running ? 1 : 0}:${node.id === selectedUav ? 1 : 0}`;
+      }).join('|');
+      if (signature === lastUavTabsSignature) return;
+      lastUavTabsSignature = signature;
+
+      const tabs = el('uav-tabs');
+      tabs.innerHTML = '';
+      uavNodes.forEach((node) => {
+        const btn = document.createElement('button');
+        btn.className = `tab ${node.id === selectedUav ? 'active' : ''}`;
+        const cs = node.container_status || {};
+        const tabStatus = !cs.running ? 'bad' : (node.rtp_running ? 'good' : 'warn');
+        btn.innerHTML = `<span class="tab-dot ${tabStatus}"></span><span>${escapeHtml(node.id)}</span>`;
+        btn.onclick = () => {
+          if (selectedUav === node.id) return;
+          const reconnect = controlWsIsActive();
+          const previousWs = controlWs;
+          if (reconnect) {
+            releaseAll();
+            controlWs = null;
+            controlWsTarget = '';
+            setControlConnected(false, true);
+            if (previousWs && previousWs.readyState !== WebSocket.CLOSED) previousWs.close();
+          }
+          selectedUav = node.id;
+          localStorage.setItem('ucs.selectedUav', selectedUav);
+          clearManualControlWs();
+          syncControlEndpoint({force: true});
+          renderAll();
+          if (reconnect) setTimeout(connectControl, 160);
+        };
+        tabs.appendChild(btn);
+      });
+    }
+
+    function renderMatrix() {
+      renderMatrixTabs();
+      const table = el('link-matrix');
+      const matrixIds = (state.nodes || []).filter((node) => node.type === 'ground_station' || node.type === 'uav').map((node) => node.id);
+      const activeIds = matrixIds.length ? matrixIds : ids;
+      const header = `<tr><th></th>${activeIds.map((id) => `<th class="${id === selectedUav ? 'selected-axis' : ''}">${escapeHtml(id)}</th>`).join('')}</tr>`;
+      const rows = activeIds.map((row) => {
+        const cells = activeIds.map((col) => {
+          const selectedAxis = row === selectedUav || col === selectedUav ? 'selected-axis' : '';
+          if (row === col) return `<td class="diag ${selectedAxis}">·</td>`;
+          const link = linkByPair(row, col);
+          if (!link) return `<td class="${selectedAxis}"></td>`;
+          const metric = matrixMetric(link);
+          const per = link.post_mac_drop === null || link.post_mac_drop === undefined ? (link.per === null || link.per === undefined ? '--' : pctText(link.per)) : pctText(link.post_mac_drop);
+          const phyPer = link.phy_per === null || link.phy_per === undefined ? '--' : pctText(link.phy_per);
+          const rawPer = link.raw_per === null || link.raw_per === undefined ? '--' : pctText(link.raw_per);
+          const dist = link.distance_m === null || link.distance_m === undefined ? '--' : fmt(link.distance_m, 1, 'm');
+          const jitter = linkJitterMs(link) === null ? '--' : fmt(linkJitterMs(link), 2, 'ms');
+          const retryDelay = link.retry_delay_ms === null || link.retry_delay_ms === undefined ? '--' : fmt(link.retry_delay_ms, 2, 'ms');
+          const queueDelay = link.queue_delay_ms === null || link.queue_delay_ms === undefined ? '--' : fmt(link.queue_delay_ms, 2, 'ms');
+          const busyDelay = link.busy_delay_ms === null || link.busy_delay_ms === undefined ? '--' : fmt(link.busy_delay_ms, 2, 'ms');
+          const airtime = link.airtime_ms === null || link.airtime_ms === undefined ? '--' : fmt(link.airtime_ms, 2, 'ms');
+          const queueService = link.queue_service_ms === null || link.queue_service_ms === undefined ? airtime : fmt(link.queue_service_ms, 2, 'ms');
+          const queueBusy = link.queue_busy_ms === null || link.queue_busy_ms === undefined ? busyDelay : fmt(link.queue_busy_ms, 2, 'ms');
+          const queueDropped = link.queue_dropped === null || link.queue_dropped === undefined ? '--' : link.queue_dropped;
+          const queuePackets = link.queue_packets === null || link.queue_packets === undefined ? (link.mac_pending ?? '--') : link.queue_packets;
+          const queueBytes = link.queue_bytes === null || link.queue_bytes === undefined ? '--' : link.queue_bytes;
+          const macExpected = link.mac_expected_drop === null || link.mac_expected_drop === undefined ? '--' : pctText(link.mac_expected_drop);
+          const macObserved = link.mac_delivery_loss === null || link.mac_delivery_loss === undefined ? '--' : pctText(link.mac_delivery_loss);
+          const macRetryAvg = link.mac_retry_count_avg === null || link.mac_retry_count_avg === undefined ? '--' : fmt(link.mac_retry_count_avg, 2, '');
+          const delay = link.delay_ms === null || link.delay_ms === undefined ? '--' : fmt(link.delay_ms, 2, 'ms');
+          const rx = link.rx_dbm === null || link.rx_dbm === undefined ? '--' : fmt(link.rx_dbm, 1, 'dBm');
+          const pathLoss = link.path_loss_db === null || link.path_loss_db === undefined ? '--' : fmt(link.path_loss_db, 1, 'dB');
+          const shadow = link.shadow_db === null || link.shadow_db === undefined ? '--' : fmt(link.shadow_db, 1, 'dB');
+          const obstruction = link.obstruction_loss_db === null || link.obstruction_loss_db === undefined ? '--' : fmt(link.obstruction_loss_db, 1, 'dB');
+          const obstructionRaw = link.obstruction_raw_loss_db === null || link.obstruction_raw_loss_db === undefined ? '--' : fmt(link.obstruction_raw_loss_db, 1, 'dB');
+          const channelState = link.channel_state || '--';
+          const multipath = link.multipath_db === null || link.multipath_db === undefined ? '--' : fmt(link.multipath_db, 1, 'dB');
+          const resampled = link.multipath_resampled === null || link.multipath_resampled === undefined ? '--' : link.multipath_resampled;
+          const modelText = link.loss_model_label || link.loss_model || '--';
+          const delegated = isNativeWifiMode() || link.loss_delegated;
+          const deliveryTitle = delegated
+            ? `drop authority ${link.drop_authority || 'ns3_wifi_phy_mac'}\nlegacy PER/MAC loss delegated_to_ns3_wifi`
+            : `Current prior MAC drop ${per}\nMAC expected drop ${macExpected}\nObserved cumulative MAC delivery loss ${macObserved}\nPHY single-attempt PER ${phyPer}\nraw PHY PER ${rawPer}\nMAC retry avg ${macRetryAvg}\nqueue delay ${queueDelay}\nqueue busy ${queueBusy}\nqueue service ${queueService}\nqueue packets ${queuePackets} · bytes ${queueBytes} · dropped ${queueDropped}\nbusy/backoff delay ${busyDelay}\nretry delay ${retryDelay}\nairtime ${airtime}\ndelay ${delay}\nmac drop reason ${link.mac_drop_reason || '--'}\nmac pending ${link.mac_pending ?? '--'} · delivered ${link.mac_delivered ?? '--'} · dropped ${link.mac_dropped ?? '--'} · phy attempts ${link.mac_phy_attempts ?? '--'}\ndropped ${link.dropped ?? '--'} / forwarded ${link.forwarded ?? '--'}`;
+          const title = `${row} ↔ ${col}\nmode ${metric.label}\nchannel ${channelState}\n${deliveryTitle}\nrx ${rx}\nmodel ${modelText}\npath loss ${pathLoss}\nshadow ${shadow}\nobstruction ${obstruction} / raw ${obstructionRaw}\nmultipath ${multipath} · resampled ${resampled}`;
+          const subHtml = metric.sub ? `<small>${escapeHtml(metric.sub)}</small>` : '';
+          return `<td class="${selectedAxis}" title="${escapeAttr(title)}"><div class="cell ${link.status || 'unknown'}"><span class="metric-main">${escapeHtml(metric.main)}</span>${subHtml}</div></td>`;
+        }).join('');
+        return `<tr><th class="row-head ${row === selectedUav ? 'selected-axis' : ''}">${escapeHtml(row)}</th>${cells}</tr>`;
+      }).join('');
+      table.innerHTML = header + rows;
+    }
+
+    function canvasPoint(pos, transform) {
+      return {
+        x: transform.cx + pos.x * transform.scale,
+        y: transform.cy - pos.y * transform.scale,
+      };
+    }
+
+    function drawWorld() {
+      const canvas = el('world-canvas');
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const width = Math.max(320, Math.floor(rect.width));
+      const height = Math.max(240, Math.floor(rect.height));
+      if (canvas.width !== Math.floor(width * dpr) || canvas.height !== Math.floor(height * dpr)) {
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+      }
+      const ctx = canvas.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.fillStyle = '#e7f1f5';
+      ctx.fillRect(0, 0, width, height);
+
+      const points = [];
+      (state.nodes || []).forEach((node) => {
+        if (node.position && Number.isFinite(Number(node.position.x)) && Number.isFinite(Number(node.position.y))) {
+          points.push({x: Number(node.position.x), y: Number(node.position.y)});
+        }
+      });
+      (state.topology?.link_simulation?.obstacles || []).forEach((obs) => {
+        if (Array.isArray(obs.center)) points.push({x: Number(obs.center[0]), y: Number(obs.center[1])});
+      });
+      const minX = Math.min(-45, ...points.map((p) => p.x));
+      const maxX = Math.max(45, ...points.map((p) => p.x));
+      const minY = Math.min(-45, ...points.map((p) => p.y));
+      const maxY = Math.max(45, ...points.map((p) => p.y));
+      const pad = 34;
+      const fitScale = Math.min((width - pad * 2) / Math.max(1, maxX - minX), (height - pad * 2) / Math.max(1, maxY - minY));
+      const centerX = (minX + maxX) / 2;
+      const centerY = (minY + maxY) / 2;
+      const scale = fitScale * worldView.zoom;
+      const transform = {
+        scale,
+        cx: width / 2 - centerX * scale + worldView.panX,
+        cy: height / 2 + centerY * scale + worldView.panY,
+      };
+      lastWorldFrame = {width, height, minX, maxX, minY, maxY, fitScale, centerX, centerY, transform};
+
+      ctx.strokeStyle = 'rgba(80, 121, 139, 0.18)';
+      ctx.lineWidth = 1;
+      for (let gx = Math.ceil(minX / 10) * 10; gx <= maxX; gx += 10) {
+        const p1 = canvasPoint({x: gx, y: minY}, transform);
+        const p2 = canvasPoint({x: gx, y: maxY}, transform);
+        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+      }
+      for (let gy = Math.ceil(minY / 10) * 10; gy <= maxY; gy += 10) {
+        const p1 = canvasPoint({x: minX, y: gy}, transform);
+        const p2 = canvasPoint({x: maxX, y: gy}, transform);
+        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(67, 103, 119, 0.26)';
+      ctx.strokeRect(10.5, 10.5, width - 21, height - 21);
+
+      const obsList = state.topology?.link_simulation?.obstacles || [];
+      obsList.forEach((obs) => {
+        if (!Array.isArray(obs.center) || !Array.isArray(obs.size)) return;
+        const center = {x: Number(obs.center[0]), y: Number(obs.center[1])};
+        const size = {x: Number(obs.size[0]), y: Number(obs.size[1])};
+        const topLeft = canvasPoint({x: center.x - size.x / 2, y: center.y + size.y / 2}, transform);
+        ctx.fillStyle = 'rgba(92, 111, 120, 0.38)';
+        ctx.strokeStyle = 'rgba(64, 91, 103, 0.58)';
+        ctx.lineWidth = 1;
+        ctx.fillRect(topLeft.x, topLeft.y, size.x * scale, size.y * scale);
+        ctx.strokeRect(topLeft.x, topLeft.y, size.x * scale, size.y * scale);
+      });
+
+      const worldLinks = (state.links || []).filter(isWorldTopologyLink);
+      const activeRoutes = activeRouteKeys();
+      const inactiveRoutes = inactiveRouteKeys();
+      const drawLink = (link, style) => {
+        const src = nodeById(link.src);
+        const dst = nodeById(link.dst);
+        if (!src?.position || !dst?.position) return;
+        const a = canvasPoint(src.position, transform);
+        const b = canvasPoint(dst.position, transform);
+        ctx.strokeStyle = style.color;
+        ctx.globalAlpha = style.alpha;
+        ctx.lineWidth = style.width;
+        ctx.lineCap = 'round';
+        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.lineCap = 'butt';
+      };
+
+      worldLinks.forEach((link) => {
+        drawLink(link, {color: '#b7c5cf', alpha: 0.52, width: 1.35});
+      });
+      worldLinks.forEach((link) => {
+        if (!inactiveRoutes.has(pairKey(link.src, link.dst))) return;
+        drawLink(link, {color: '#8fb9a8', alpha: 0.66, width: 2.35});
+      });
+      worldLinks.forEach((link) => {
+        if (!activeRoutes.has(pairKey(link.src, link.dst))) return;
+        drawLink(link, {color: '#21b983', alpha: 0.96, width: 4.1});
+      });
+
+      const headIds = clusterHeadIdSet();
+      (state.nodes || []).forEach((node) => {
+        if (!node.position) return;
+        const p = canvasPoint(node.position, transform);
+        const isSelected = node.id === selectedUav;
+        const isHead = headIds.has(node.id);
+        if (isSelected) {
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 14, 0, Math.PI * 2);
+          ctx.fillStyle = 'rgba(245, 197, 66, 0.28)';
+          ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, node.type === 'ground_station' ? 8 : 7, 0, Math.PI * 2);
+        ctx.fillStyle = node.type === 'ground_station' ? '#0c2230' : (isHead ? '#16825d' : '#1677a3');
+        ctx.fill();
+        ctx.lineWidth = isSelected ? 4 : 2;
+        ctx.strokeStyle = isSelected ? '#f5c542' : '#ffffff';
+        ctx.stroke();
+        ctx.textAlign = 'center';
+        if (node.type === 'ground_station' || isSelected || isHead) {
+          ctx.font = '700 12px Inter, Arial';
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.84)';
+          ctx.lineWidth = 3;
+          ctx.strokeText(node.id, p.x, p.y - 13);
+          ctx.fillStyle = '#0a1f2a';
+          ctx.fillText(node.id, p.x, p.y - 13);
+        } else {
+          ctx.font = '800 9px Inter, Arial';
+          ctx.fillStyle = '#ffffff';
+          ctx.fillText(String(node.id).replace('uav', ''), p.x, p.y + 3);
+        }
+      });
+    }
+
+    function renderVideoAndFacts() {
+      const node = nodeById(selectedUav);
+      if (!node) return;
+      const receivers = state.video_proxy?.receivers || [];
+      const streams = node.video_streams || [];
+      const subStream = streams.find((item) => item.key === 'video') || {};
+      const mainStream = streams.find((item) => item.key === 'video_main') || {};
+      const receiver = node.video_receiver || subStream.receiver || receivers.find((item) => Number(item.port) === Number(node.video_port));
+      let rxText = '';
+      let rxLabel = node.rtp_running ? 'RTP active' : 'RTP down';
+      if (receiver) {
+        const fps = receiver.fps === null || receiver.fps === undefined ? '--fps' : `${Math.round(receiver.fps)}fps`;
+        const badPackets = Number(receiver.rtp_lost || 0) + Number(receiver.rtp_late || 0);
+        const rtpLoss = receiver.rtp_loss_rate === null || receiver.rtp_loss_rate === undefined ? '' : ` · RTP loss ${pctText(receiver.rtp_loss_rate)}`;
+        const decoder = receiver.decoder ? ` · ${receiver.decoder}` : '';
+        rxText = ` · mjpeg ${receiver.frames || 0}f ${fps}${rtpLoss}${badPackets ? ` · bad ${badPackets}` : ''}`;
+        rxLabel = `${receiver.status || 'rx'} · ${receiver.frames || 0}f · ${fps}${decoder}${rtpLoss}${badPackets ? ` · bad ${badPackets}` : ''}`;
+      }
+      const streamText = mainStream.port
+        ? `sub ${subStream.resolution || '--'}:${subStream.port || node.video_port || '--'} · main ${mainStream.resolution || '--'}:${mainStream.port}`
+        : `sub ${subStream.resolution || '--'}:${subStream.port || node.video_port || '--'}`;
+      el('video-meta').textContent = `${ipShort(node.exp_ip)} → ${node.video_destination || '--'}${rxText}`;
+      el('video-uav-badge').textContent = `${node.id} · ${ipShort(node.exp_ip)} · ${streamText}`;
+      el('video-rx-badge').textContent = rxLabel;
+      el('video-empty-text').textContent = `${node.camera_topic || ''}`;
+      el('video-empty').style.display = node.rtp_running ? 'none' : 'grid';
+      const frame = el('video-frame');
+      const videoUrl = `/video/${selectedUav}.mjpg?w=960&h=540&q=75`;
+      frame.style.display = node.rtp_running ? 'block' : 'none';
+      if (node.rtp_running && !frame.src.endsWith(videoUrl)) frame.src = videoUrl;
+      frame.onerror = () => { el('video-empty').style.display = 'grid'; };
+      frame.onload = () => { if (node.rtp_running) el('video-empty').style.display = 'none'; };
+
+      const cs = node.container_status || {};
+      el('uav-title').textContent = `${node.id} · ${node.model_name || '--'}`;
+      el('fact-container').textContent = `${node.container || '--'} / ${cs.status || 'unknown'}`;
+      el('fact-ip').textContent = ipShort(node.exp_ip);
+      el('fact-qgc').textContent = node.qgc_port || '--';
+      el('fact-mavsdk').textContent = node.mavsdk_remote_port ? `${node.mavsdk_url || ''}` : '--';
+      el('fact-rtp').textContent = mainStream.port ? `${node.video_port || '--'} / ${mainStream.port}` : (node.video_port || '--');
+      el('fact-cluster').textContent = `${node.cluster_id || '--'}${clusterHeadIdSet().has(node.id) ? ' / head' : ''}`;
+      if (node.position) {
+        el('fact-position').textContent = `${fmt(node.position.x, 1)}, ${fmt(node.position.y, 1)}, ${fmt(node.position.z, 1)}`;
+      } else {
+        el('fact-position').textContent = '--';
+      }
+      el('fact-rx').textContent = rxLabel;
+      const wifi = node.wifi_stats || {};
+      if (wifi.source) {
+        el('fact-wifi-txrx').textContent = `${wifi.mac_tx_packets ?? 0}/${wifi.mac_rx_packets ?? 0} · phy ${wifi.phy_tx_begin_packets ?? 0}/${wifi.phy_rx_end_packets ?? 0}`;
+        el('fact-wifi-drop').textContent = `phy ${wifi.phy_rx_drop_packets ?? 0} · mac ${wifi.mac_tx_drop_packets ?? 0}/${wifi.mac_rx_drop_packets ?? 0} · final ${wifi.final_data_failed ?? 0}`;
+        el('fact-wifi-retry').textContent = `${wifi.retry_count ?? 0} · timeout ${wifi.mpdu_response_timeout ?? 0}`;
+      } else {
+        el('fact-wifi-txrx').textContent = '--';
+        el('fact-wifi-drop').textContent = '--';
+        el('fact-wifi-retry').textContent = '--';
+      }
+      const backend = node.control_relay_open ? `control ${node.control_relay_port} up` : 'control down';
+      el('control-meta').textContent = `${cs.running ? 'container running' : 'container not running'} · ${backend}`;
+    }
+
+    function renderAll() {
+      renderTopStatus();
+      renderTabs();
+      renderMatrix();
+      renderVideoAndFacts();
+      drawWorld();
+      syncControlEndpoint();
+    }
+
+    function setControlConnected(connected, warn = false) {
+      el('control-state').textContent = connected ? 'connected' : 'disconnected';
+      setDot('dot-control', connected ? 'good' : (warn ? 'warn' : 'bad'));
+      el('btn-connect').textContent = connected ? '断开' : '连接';
+    }
+
+    function sendLegacyCommand(command) {
+      if (!controlWs || controlWs.readyState !== WebSocket.OPEN) return;
+      if (command.startsWith('throttle:')) {
+        controlWs.send(command);
+      } else if (command === 'get_throttle') {
+        controlWs.send(JSON.stringify({type: 'get_throttle'}));
+      } else {
+        controlWs.send(JSON.stringify({type: 'command', command, uav: selectedUav}));
+      }
+    }
+
+    function sendRelay(payload, target = selectedUav) {
+      if (!controlWs || controlWs.readyState !== WebSocket.OPEN) return;
+      controlWs.send(JSON.stringify({...payload, uav: target}));
+    }
+
+    function sendKey(key, action) {
+      const protocol = el('control-protocol').value;
+      if (protocol === 'legacy') {
+        sendLegacyCommand(`${action}:${key}`);
+      } else {
+        sendRelay({type: 'key', action, key});
+      }
+    }
+
+    function sendLegacyPulse(key) {
+      sendLegacyCommand(`press:${key}`);
+      setTimeout(() => sendLegacyCommand(`release:${key}`), 120);
+    }
+
+    function sendCommand(name, value = undefined) {
+      const protocol = el('control-protocol').value;
+      if (protocol === 'legacy') {
+        const legacyPulse = {arm_offboard: 'c', land: 'l', rtl: 'h'};
+        if (name === 'set_throttle') sendLegacyCommand(`throttle:${Number(value).toFixed(2)}`);
+        else if (legacyPulse[name]) sendLegacyPulse(legacyPulse[name]);
+        else if (name === 'sync_status') sendLegacyCommand('get_throttle');
+        else if (name === 'release_all') return;
+        else sendLegacyCommand(name);
+      } else {
+        const payload = {type: 'command', name};
+        if (value !== undefined) payload.value = value;
+        sendRelay(payload);
+      }
+    }
+
+    function connectControl() {
+      if (controlWs && controlWs.readyState === WebSocket.OPEN) {
+        releaseAll();
+        controlWs.close();
+        return;
+      }
+      syncControlEndpoint();
+      const target = selectedUav;
+      const url = el('control-ws').value.trim();
+      const protocol = el('control-protocol').value;
+      localStorage.setItem('ucs.controlProtocol', protocol);
+      const ws = new WebSocket(url);
+      controlWs = ws;
+      controlWsTarget = target;
+      setControlConnected(false, true);
+      ws.onopen = () => {
+        if (controlWs !== ws) return;
+        if (protocol === 'legacy') controlWs.send('SECURE_TOKEN_123');
+        else sendRelay({type: 'hello'}, target);
+        setControlConnected(true);
+        appendLog(`remote connected: ${target} ${url} (${protocol})`);
+      };
+      ws.onclose = () => {
+        if (controlWs !== ws) return;
+        controlWsTarget = '';
+        setControlConnected(false);
+        appendLog('remote disconnected');
+      };
+      ws.onerror = () => {
+        if (controlWs !== ws) return;
+        setControlConnected(false, true);
+        appendLog('remote websocket error');
+      };
+      ws.onmessage = (event) => {
+        if (controlWs !== ws) return;
+        let msg = null;
+        try { msg = JSON.parse(event.data); } catch { appendLog(event.data); return; }
+        if (msg.type === 'relay_status') {
+          const relayTarget = msg.target_uav || controlWsTarget || selectedUav;
+          appendLog(`relay ${relayTarget} core=${msg.core_connected ? 'up' : 'down'} clients=${msg.ws_clients ?? '--'}`);
+          return;
+        }
+        if (msg.type === 'status') {
+          if (msg.target_uav && msg.target_uav !== selectedUav) return;
+          appendLog(`vehicle connected=${Boolean(msg.connected)} speed=${msg.throttle ?? '--'}`);
+          if (typeof msg.throttle === 'number') {
+            el('throttle').value = msg.throttle.toFixed(2);
+            el('throttle-text').textContent = msg.throttle.toFixed(2);
+          }
+          return;
+        }
+        if (msg.type === 'throttle_status' && typeof msg.throttle === 'number') {
+          el('throttle').value = msg.throttle.toFixed(2);
+          el('throttle-text').textContent = msg.throttle.toFixed(2);
+          return;
+        }
+        if (msg.type === 'log') appendLog(msg.message || JSON.stringify(msg));
+      };
+    }
+
+    function pressKey(key) {
+      if (!holdKeys.has(key) && !pulseKeys.has(key)) return;
+      if (holdKeys.has(key)) {
+        if (activeKeys.has(key)) return;
+        activeKeys.add(key);
+        sendKey(key, 'press');
+      } else {
+        sendKey(key, 'press');
+        if (el('control-protocol').value === 'legacy') {
+          setTimeout(() => sendKey(key, 'release'), 120);
+        }
+      }
+      document.querySelectorAll(`.key[data-key="${key}"]`).forEach((node) => node.classList.add('active'));
+    }
+
+    function releaseKey(key) {
+      if (!holdKeys.has(key)) return;
+      if (!activeKeys.has(key)) return;
+      activeKeys.delete(key);
+      sendKey(key, 'release');
+      document.querySelectorAll(`.key[data-key="${key}"]`).forEach((node) => node.classList.remove('active'));
+    }
+
+    function releaseAll() {
+      [...activeKeys].forEach((key) => releaseKey(key));
+      sendCommand('release_all');
+    }
+
+    document.querySelectorAll('.key[data-key]').forEach((node) => {
+      const key = node.dataset.key;
+      node.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        pressKey(key);
+      });
+      node.addEventListener('pointerup', (event) => {
+        event.preventDefault();
+        releaseKey(key);
+      });
+      node.addEventListener('pointerleave', () => releaseKey(key));
+      node.addEventListener('pointercancel', () => releaseKey(key));
+    });
+
+    window.addEventListener('keydown', (event) => {
+      const key = event.key.toLowerCase();
+      if (!holdKeys.has(key) && !pulseKeys.has(key)) return;
+      event.preventDefault();
+      if (event.repeat && pulseKeys.has(key)) return;
+      pressKey(key);
+    });
+
+    window.addEventListener('keyup', (event) => {
+      const key = event.key.toLowerCase();
+      if (!holdKeys.has(key) && !pulseKeys.has(key)) return;
+      event.preventDefault();
+      releaseKey(key);
+    });
+
+    el('btn-connect').addEventListener('click', connectControl);
+    el('control-ws').addEventListener('input', (event) => {
+      manualControlWs = event.target.value.trim();
+      if (manualControlWs) localStorage.setItem('ucs.controlWs', manualControlWs);
+      else localStorage.removeItem('ucs.controlWs');
+    });
+    el('btn-arm').addEventListener('click', () => sendCommand('arm_offboard'));
+    el('btn-land').addEventListener('click', () => sendCommand('land'));
+    el('btn-rtl').addEventListener('click', () => sendCommand('rtl'));
+    el('btn-sync').addEventListener('click', () => sendCommand('sync_status'));
+    el('btn-release').addEventListener('click', releaseAll);
+    el('btn-stop').addEventListener('click', () => {
+      releaseAll();
+      if (el('control-protocol').value === 'legacy') sendLegacyCommand('press:\x1b');
+    });
+    el('throttle').addEventListener('input', (event) => {
+      el('throttle-text').textContent = Number(event.target.value).toFixed(2);
+    });
+    el('throttle').addEventListener('change', (event) => {
+      sendCommand('set_throttle', Number(event.target.value));
+    });
+
+    document.querySelectorAll('.matrix-tab[data-matrix-mode]').forEach((node) => {
+      node.addEventListener('click', () => {
+        matrixMode = node.dataset.matrixMode || 'distance';
+        localStorage.setItem('ucs.matrixMode', matrixMode);
+        if (state) {
+          renderTopStatus();
+          renderMatrix();
+        }
+      });
+    });
+
+    const worldCanvas = el('world-canvas');
+    const worldWrap = document.querySelector('.world-wrap');
+    function clampWorldPan() {
+      const frame = lastWorldFrame;
+      if (!frame) return;
+      worldView.panX = clamp(worldView.panX, -frame.width * 3, frame.width * 3);
+      worldView.panY = clamp(worldView.panY, -frame.height * 3, frame.height * 3);
+    }
+    function setWorldZoom(nextZoom, anchor = null) {
+      const previous = lastWorldFrame?.transform;
+      const rect = worldCanvas.getBoundingClientRect();
+      const newZoom = clamp(nextZoom, 0.45, 6);
+      if (!previous || !anchor) {
+        worldView.zoom = newZoom;
+        clampWorldPan();
+        if (state) drawWorld();
+        return;
+      }
+      const local = {x: anchor.x - rect.left, y: anchor.y - rect.top};
+      const world = {x: (local.x - previous.cx) / previous.scale, y: (previous.cy - local.y) / previous.scale};
+      worldView.zoom = newZoom;
+      const frame = lastWorldFrame;
+      const nextScale = frame.fitScale * newZoom;
+      worldView.panX = local.x - (frame.width / 2 - frame.centerX * nextScale + world.x * nextScale);
+      worldView.panY = local.y - (frame.height / 2 + frame.centerY * nextScale - world.y * nextScale);
+      clampWorldPan();
+      if (state) drawWorld();
+    }
+
+    el('world-zoom-in').addEventListener('click', () => setWorldZoom(worldView.zoom * 1.18));
+    el('world-zoom-out').addEventListener('click', () => setWorldZoom(worldView.zoom / 1.18));
+    el('world-reset').addEventListener('click', () => {
+      worldView = {zoom: 1, panX: 0, panY: 0};
+      if (state) drawWorld();
+    });
+    worldWrap.addEventListener('wheel', (event) => {
+      if (event.target.closest('.world-tools')) return;
+      event.preventDefault();
+      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+      setWorldZoom(worldView.zoom * factor, {x: event.clientX, y: event.clientY});
+    }, {passive: false});
+
+    function beginWorldDrag(clientX, clientY) {
+      worldCanvas.classList.add('dragging');
+      worldWrap.classList.add('dragging');
+      document.body.classList.add('world-dragging');
+      worldDrag = {x: clientX, y: clientY, panX: worldView.panX, panY: worldView.panY};
+    }
+
+    function moveWorldDrag(clientX, clientY) {
+      if (!worldDrag) return;
+      worldView.panX = worldDrag.panX + clientX - worldDrag.x;
+      worldView.panY = worldDrag.panY + clientY - worldDrag.y;
+      clampWorldPan();
+      if (state) drawWorld();
+    }
+
+    function endWorldDrag() {
+      if (!worldDrag) return;
+      worldDrag = null;
+      worldCanvas.classList.remove('dragging');
+      worldWrap.classList.remove('dragging');
+      document.body.classList.remove('world-dragging');
+    }
+
+    worldWrap.addEventListener('mousedown', (event) => {
+      if (event.target.closest('.world-tools, .legend')) return;
+      if (event.button !== 0) return;
+      event.preventDefault();
+      beginWorldDrag(event.clientX, event.clientY);
+    });
+
+    document.addEventListener('mousemove', (event) => {
+      if (!worldDrag) return;
+      event.preventDefault();
+      moveWorldDrag(event.clientX, event.clientY);
+    });
+
+    document.addEventListener('mouseup', endWorldDrag);
+    document.addEventListener('mouseleave', endWorldDrag);
+
+    worldWrap.addEventListener('touchstart', (event) => {
+      if (event.target.closest('.world-tools, .legend')) return;
+      if (!event.touches.length) return;
+      const touch = event.touches[0];
+      event.preventDefault();
+      beginWorldDrag(touch.clientX, touch.clientY);
+    }, {passive: false});
+
+    document.addEventListener('touchmove', (event) => {
+      if (!worldDrag || !event.touches.length) return;
+      const touch = event.touches[0];
+      event.preventDefault();
+      moveWorldDrag(touch.clientX, touch.clientY);
+    }, {passive: false});
+
+    document.addEventListener('touchend', endWorldDrag);
+    document.addEventListener('touchcancel', endWorldDrag);
+    worldWrap.addEventListener('dragstart', (event) => event.preventDefault());
+
+    window.addEventListener('resize', () => { if (state) drawWorld(); });
+    window.addEventListener('blur', releaseAll);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+    window.addEventListener('beforeunload', releaseAll);
+
+    refreshState();
+    setInterval(refreshState, STATE_REFRESH_MS);
+  </script>
+</body>
+</html>

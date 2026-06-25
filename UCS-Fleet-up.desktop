@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=UCS BMv2 Fleet Up
+Comment=Start UCS 6-UAV BMv2 fleet with video, browser control, and dashboard
+Exec=gnome-terminal -- /home/thewifi/Project/ucs/ucs-simulation/fleet/desktop_fleet_up.sh
+Path=/home/thewifi/Project/ucs/ucs-simulation
+Icon=/home/thewifi/Project/ucs/ucs-simulation/fleet/icons/ucs_fleet_icon_up.png
+Terminal=false
+Categories=Development;
+StartupNotify=true

@@ -1,0 +1,763 @@
+{
+  "schema_version": 2,
+  "scenario_id": "wifi_adhoc_matrix_2x3_6uav_v1",
+  "description": "UCS mesh stage-4 topology: Linux-visible L2 mesh with BMv2 inline dataplanes, isolated ns-3 endpoint-pair wireless links, and gimbal-camera UAV payloads. Observation traffic stays on Docker 172.x eth0; experiment traffic uses one visible eth1 per UAV. links[] and mesh_links[] are independent logical wireless links with per-pair loss, queueing, and ARQ state; they do not share an ad-hoc Wi-Fi contention domain.",
+  "globals": {
+    "fabric_mode": "l2_link_mesh",
+    "gs_id": "gs",
+    "tap_left": "tap-gs",
+    "exp_if": "eth1",
+    "time_file": "/tmp/ucs_mesh_sim_time.txt",
+    "gz_partition": "ucs",
+    "px4_gz_world_name": "ucs_obstacle_field",
+    "world_sdf": "px4_gazebo/worlds/ucs_obstacle_field.sdf",
+    "px4_sim_model_name": "gz_x500_gimbal",
+    "tick": "4ms",
+    "pcap": false,
+    "verbose": false,
+    "stop_time": 0,
+    "gs_pose": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 1.5
+    },
+    "observation_net": {
+      "interface": "eth0",
+      "address_family": "docker_bridge_172"
+    },
+    "experiment_net": {
+      "mode": "l2_link_mesh",
+      "address_rule": "10.10.<cluster_id>.<node_id>/24",
+      "reserved_cluster_id": 0,
+      "uav_cluster_ids": [
+        1,
+        2
+      ],
+      "route_policy": "linux_onlink_peer_routes",
+      "impairment_policy": "ns3_pairwise_links",
+      "gs_ips": [
+        "10.10.0.254/24"
+      ],
+      "peer_route_scope": "link",
+      "ns3_role": "isolated_pairwise_l2_impairment_no_ip_routing"
+    },
+    "business_flows": {
+      "control": {
+        "enabled": true,
+        "network": "experiment",
+        "protocol": "udp",
+        "direction": "gs_to_uav_and_uav_to_gs",
+        "port_source": "instances[].qgc_port",
+        "qgc": {
+          "enabled": true,
+          "port_source": "instances[].qgc_port",
+          "local_port_rule": "18570 + instances[].px4_instance",
+          "remote_ip": "ground_station.exp_ip",
+          "remote_port": 14550,
+          "rate_bytes_per_sec": 20000,
+          "traffic_class": "control"
+        },
+        "mavsdk": {
+          "enabled": true,
+          "uav_local_port_base": 18600,
+          "uav_local_port_rule": "18600 + instances[].idx",
+          "gs_remote_port_base": 14600,
+          "gs_remote_port_rule": "14600 + instances[].idx",
+          "remote_ip": "ground_station.exp_ip",
+          "rate_bytes_per_sec": 20000,
+          "px4_default_offboard_rate_bytes_per_sec": 20000,
+          "mavsdk_url_rule": "udpin://0.0.0.0:<gs_remote_port>",
+          "runner": "control/control_up.sh",
+          "traffic_class": "control"
+        },
+        "traffic_class": "control",
+        "latency_sensitive": true
+      },
+      "video": {
+        "enabled": true,
+        "role": "sub",
+        "label": "sub",
+        "network": "experiment",
+        "protocol": "udp",
+        "encoding": "rtp_h264",
+        "direction": "uav_to_gs",
+        "port_base": 5600,
+        "port_rule": "5600 + instances[].idx",
+        "traffic_class": "video",
+        "source": "Gazebo x500_gimbal camera topic, downscaled for dashboard preview",
+        "source_resolution": "1920x1080",
+        "default_resolution": "960x540",
+        "default_fps": 30,
+        "default_bitrate_kbps": 1500,
+        "bridge": {
+          "runner": "video/run_rtp_camera_flow.sh",
+          "sender_namespace": "instances[].container_name network namespace",
+          "source_ip": "instances[].exp_ip",
+          "destination_ip": "ground_station.exp_ip",
+          "camera_topic_rule": "/world/<px4_gz_world_name>/model/<instances[].model_name>/link/<payload.camera_link>/sensor/<payload.camera_sensor>/image"
+        }
+      },
+      "video_main": {
+        "enabled": true,
+        "role": "main",
+        "label": "main",
+        "network": "experiment",
+        "protocol": "udp",
+        "encoding": "rtp_h264",
+        "direction": "uav_to_gs",
+        "port_base": 5700,
+        "port_rule": "5700 + instances[].idx",
+        "traffic_class": "video_main",
+        "source": "Gazebo x500_gimbal camera topic",
+        "source_resolution": "1920x1080",
+        "default_resolution": "1920x1080",
+        "default_fps": 30,
+        "default_bitrate_kbps": 8000,
+        "bridge": {
+          "runner": "video/run_rtp_camera_flow.sh",
+          "sender_namespace": "instances[].container_name network namespace",
+          "source_ip": "instances[].exp_ip",
+          "destination_ip": "ground_station.exp_ip",
+          "camera_topic_rule": "/world/<px4_gz_world_name>/model/<instances[].model_name>/link/<payload.camera_link>/sensor/<payload.camera_sensor>/image"
+        }
+      }
+    },
+    "payload": {
+      "profile": "camera_gimbal",
+      "px4_airframe": "gz_x500_gimbal",
+      "gazebo_model": "x500_gimbal",
+      "camera_link": "camera_link",
+      "camera_sensor": "camera",
+      "gimbal_command_topics": [
+        "command/gimbal_roll",
+        "command/gimbal_pitch",
+        "command/gimbal_yaw"
+      ]
+    },
+      "link_simulation": {
+        "enabled": true,
+        "model": "large_small_fading_v1",
+        "link_error_model": "receiver_sensitivity_bler_v1",
+        "rx_sensitivity_dbm": -92.0,
+        "rx_loss_full_dbm": -96.0,
+        "noise_floor_dbm": -96.0,
+        "packet_error_bytes": 1200.0,
+        "packet_size_scaling_enabled": true,
+        "packet_error_rate_cap": 1.0,
+        "packet_error_smoothing_tau_s": 0.15,
+        "mac_medium_access": "pairwise_serial_arq_v1",
+        "mac_data_rate": "20Mbps",
+        "mac_queue_limit_packets": 512,
+        "mac_retry_enabled": true,
+        "mac_retry_max_retries": 7,
+        "mac_retry_slot_time": "1ms",
+        "mac_retry_jitter_max": "2ms",
+        "mac_retry_broadcast": false,
+        "frequency_hz": 5180000000.0,
+      "large_scale": {
+        "path_loss": {
+          "model": "ns3::LogDistancePropagationLossModel",
+          "exponent": 2.15,
+          "reference_distance_m": 1.0
+        },
+        "shadow_fading": {
+          "enabled": true,
+          "stddev_db": 4.0,
+          "correlation_distance_m": 25.0
+        },
+        "obstruction": {
+          "enabled": true,
+          "base_loss_db": 6.0,
+          "loss_per_hit_db": 18.0,
+          "loss_per_meter_db": 1.5,
+          "max_loss_db": 35.0,
+          "min_intersection_m": 0.25,
+          "diffraction_margin_m": 2.0,
+          "diffraction_loss_db": 4.0,
+          "smoothing_tau_s": 0.25,
+          "edge_ramp_m": 3.0
+        }
+      },
+      "small_scale": {
+        "multipath": {
+          "enabled": true,
+          "model": "ns3::NakagamiPropagationLossModel",
+          "min_relative_speed_mps": 0.1,
+          "coherence_distance_m": 2.0,
+          "coherence_time_s": 0.75,
+          "max_loss_db": 5.0,
+          "max_gain_db": 2.0,
+          "smoothing_tau_s": 0.3,
+          "distance1_m": 80.0,
+          "distance2_m": 200.0,
+          "m0": 8.0,
+          "m1": 6.0,
+          "m2": 4.0
+        },
+        "doppler": {
+          "enabled": false,
+          "model": "ns3::JakesPropagationLossModel",
+          "min_relative_speed_mps": 0.1,
+          "doppler_frequency_hz": 80.0,
+          "oscillators": 20
+        }
+      },
+      "tx_power_dbm": 20.0,
+      "wifi": {
+        "standard": "802.11a",
+        "mac": "ns3::AdhocWifiMac",
+        "rate_manager": "ns3::ConstantRateWifiManager",
+        "data_mode": "OfdmRate54Mbps",
+        "control_mode": "OfdmRate6Mbps",
+        "tap_bridge_mode": "UseBridge",
+        "channel_settings": "{36, 20, BAND_5GHZ, 0}",
+        "rx_sensitivity_dbm": -92.0,
+        "cca_ed_threshold_dbm": -92.0
+      },
+      "obstacles": [
+        {
+          "id": "north_relay_wall",
+          "center": [
+            0.0,
+            24.0,
+            9.0
+          ],
+          "size": [
+            1.0,
+            18.0,
+            18.0
+          ],
+          "building_type": "Commercial",
+          "ext_walls_type": "ConcreteWithoutWindows",
+          "floors": 6
+        },
+        {
+          "id": "north_service_block",
+          "center": [
+            -22.0,
+            18.0,
+            10.0
+          ],
+          "size": [
+            12.0,
+            7.0,
+            20.0
+          ],
+          "building_type": "Commercial",
+          "ext_walls_type": "ConcreteWithWindows",
+          "floors": 7
+        },
+        {
+          "id": "south_hangar",
+          "center": [
+            22.0,
+            -18.0,
+            11.0
+          ],
+          "size": [
+            14.0,
+            8.0,
+            22.0
+          ],
+          "building_type": "Commercial",
+          "ext_walls_type": "ConcreteWithoutWindows",
+          "floors": 5
+        },
+        {
+          "id": "east_tower",
+          "center": [
+            32.0,
+            8.0,
+            16.0
+          ],
+          "size": [
+            4.0,
+            4.0,
+            32.0
+          ],
+          "building_type": "Office",
+          "ext_walls_type": "ConcreteWithWindows",
+          "floors": 11
+        },
+        {
+          "id": "west_tower",
+          "center": [
+            -32.0,
+            -8.0,
+            16.0
+          ],
+          "size": [
+            4.0,
+            4.0,
+            32.0
+          ],
+          "building_type": "Office",
+          "ext_walls_type": "ConcreteWithWindows",
+          "floors": 11
+        },
+        {
+          "id": "low_service_wall",
+          "center": [
+            0.0,
+            -34.0,
+            5.0
+          ],
+          "size": [
+            34.0,
+            1.0,
+            10.0
+          ],
+          "building_type": "Commercial",
+          "ext_walls_type": "ConcreteWithoutWindows",
+          "floors": 3
+        }
+      ]
+    },
+    "default_access_data_rate": "1Gbps",
+    "default_access_delay": "0ms"
+  },
+  "programmable_net": {
+    "enabled": true,
+    "placement": "in_uav_container_inline",
+    "target": "bmv2_simple_switch_grpc",
+    "control_plane": {
+      "api": "p4runtime",
+      "network": "observation",
+      "controller": "host_or_gs"
+    },
+    "ports": {
+      "local": {
+        "port_id": 1,
+        "iface": "p4local",
+        "direction": "toward_uav_apps"
+      },
+      "air": {
+        "port_id": 2,
+        "iface": "air0",
+        "direction": "toward_ns3"
+      },
+      "cpu": {
+        "port_id": 255
+      }
+    },
+    "pipeline": {
+      "mode": "p4runtime",
+      "p4_program": "p4/ucs_edge_cluster_route.p4",
+      "bmv2_json": "p4/build/ucs_edge_cluster_route.json",
+      "p4info": "p4/build/ucs_edge_cluster_route.p4info.txt"
+    },
+    "routing": {
+      "mode": "cluster_heads",
+      "cluster_heads": {
+        "1": "uav01",
+        "2": "uav04"
+      }
+    },
+    "gs_edge": {
+      "enabled": true,
+      "placement": "host_inline",
+      "runtime_image": "ucs-uav-base-gz-bmv2:20260625",
+      "container_name": "ucs-bmv2-gs-wifi_adhoc_matrix_2x3_6uav_v1",
+      "device_id": 100,
+      "grpc_addr": "127.0.0.1:9560",
+      "app_if": "gs0",
+      "local_if": "p4gs-local",
+      "air_if": "tap-gs"
+    }
+  },
+  "instances": [
+    {
+      "id": "gs",
+      "type": "ground_station",
+      "name": "gs",
+      "cluster_id": 0,
+      "exp_ip": "10.10.0.254/24",
+      "exp_ips": [
+        "10.10.0.254/24"
+      ],
+      "tap_name": "tap-gs"
+    },
+    {
+      "id": "uav01",
+      "idx": 1,
+      "cluster_id": 1,
+      "type": "uav",
+      "name": "uav01",
+      "container_name": "uav01",
+      "px4_instance": 0,
+      "model_name": "x500_gimbal_01",
+      "mav_sys_id": 1,
+      "uxrce_dds_key": 1,
+      "exp_if": "eth1",
+      "exp_ip": "10.10.1.1/24",
+      "qgc_port": 18570,
+      "p4": {
+        "enabled": true,
+        "device_id": 101,
+        "grpc_addr": "0.0.0.0:9559"
+      },
+      "tap_name": "tap-uav01",
+      "bridge_name": "br-uav01",
+      "veth_host": "veth-uav01-host",
+      "veth_ct": "veth-uav01-ct",
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav01.txt",
+      "spawn_pose": {
+        "x": -10.0,
+        "y": -3.0,
+        "z": 0.3,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      }
+    },
+    {
+      "id": "uav02",
+      "idx": 2,
+      "cluster_id": 1,
+      "type": "uav",
+      "name": "uav02",
+      "container_name": "uav02",
+      "px4_instance": 1,
+      "model_name": "x500_gimbal_02",
+      "mav_sys_id": 2,
+      "uxrce_dds_key": 2,
+      "exp_if": "eth1",
+      "exp_ip": "10.10.1.2/24",
+      "qgc_port": 18571,
+      "p4": {
+        "enabled": true,
+        "device_id": 102,
+        "grpc_addr": "0.0.0.0:9559"
+      },
+      "tap_name": "tap-uav02",
+      "bridge_name": "br-uav02",
+      "veth_host": "veth-uav02-host",
+      "veth_ct": "veth-uav02-ct",
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav02.txt",
+      "spawn_pose": {
+        "x": -6.0,
+        "y": -3.0,
+        "z": 0.3,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      }
+    },
+    {
+      "id": "uav03",
+      "idx": 3,
+      "cluster_id": 1,
+      "type": "uav",
+      "name": "uav03",
+      "container_name": "uav03",
+      "px4_instance": 2,
+      "model_name": "x500_gimbal_03",
+      "mav_sys_id": 3,
+      "uxrce_dds_key": 3,
+      "exp_if": "eth1",
+      "exp_ip": "10.10.1.3/24",
+      "qgc_port": 18572,
+      "p4": {
+        "enabled": true,
+        "device_id": 103,
+        "grpc_addr": "0.0.0.0:9559"
+      },
+      "tap_name": "tap-uav03",
+      "bridge_name": "br-uav03",
+      "veth_host": "veth-uav03-host",
+      "veth_ct": "veth-uav03-ct",
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav03.txt",
+      "spawn_pose": {
+        "x": -2.0,
+        "y": -3.0,
+        "z": 0.3,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      }
+    },
+    {
+      "id": "uav04",
+      "idx": 4,
+      "cluster_id": 2,
+      "type": "uav",
+      "name": "uav04",
+      "container_name": "uav04",
+      "px4_instance": 3,
+      "model_name": "x500_gimbal_04",
+      "mav_sys_id": 4,
+      "uxrce_dds_key": 4,
+      "exp_if": "eth1",
+      "exp_ip": "10.10.2.4/24",
+      "qgc_port": 18573,
+      "p4": {
+        "enabled": true,
+        "device_id": 104,
+        "grpc_addr": "0.0.0.0:9559"
+      },
+      "tap_name": "tap-uav04",
+      "bridge_name": "br-uav04",
+      "veth_host": "veth-uav04-host",
+      "veth_ct": "veth-uav04-ct",
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav04.txt",
+      "spawn_pose": {
+        "x": 2.0,
+        "y": 3.0,
+        "z": 0.3,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      }
+    },
+    {
+      "id": "uav05",
+      "idx": 5,
+      "cluster_id": 2,
+      "type": "uav",
+      "name": "uav05",
+      "container_name": "uav05",
+      "px4_instance": 4,
+      "model_name": "x500_gimbal_05",
+      "mav_sys_id": 5,
+      "uxrce_dds_key": 5,
+      "exp_if": "eth1",
+      "exp_ip": "10.10.2.5/24",
+      "qgc_port": 18574,
+      "p4": {
+        "enabled": true,
+        "device_id": 105,
+        "grpc_addr": "0.0.0.0:9559"
+      },
+      "tap_name": "tap-uav05",
+      "bridge_name": "br-uav05",
+      "veth_host": "veth-uav05-host",
+      "veth_ct": "veth-uav05-ct",
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav05.txt",
+      "spawn_pose": {
+        "x": 6.0,
+        "y": 3.0,
+        "z": 0.3,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      }
+    },
+    {
+      "id": "uav06",
+      "idx": 6,
+      "cluster_id": 2,
+      "type": "uav",
+      "name": "uav06",
+      "container_name": "uav06",
+      "px4_instance": 5,
+      "model_name": "x500_gimbal_06",
+      "mav_sys_id": 6,
+      "uxrce_dds_key": 6,
+      "exp_if": "eth1",
+      "exp_ip": "10.10.2.6/24",
+      "qgc_port": 18575,
+      "p4": {
+        "enabled": true,
+        "device_id": 106,
+        "grpc_addr": "0.0.0.0:9559"
+      },
+      "tap_name": "tap-uav06",
+      "bridge_name": "br-uav06",
+      "veth_host": "veth-uav06-host",
+      "veth_ct": "veth-uav06-ct",
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav06.txt",
+      "spawn_pose": {
+        "x": 10.0,
+        "y": 3.0,
+        "z": 0.3,
+        "roll": 0.0,
+        "pitch": 0.0,
+        "yaw": 0.0
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "gs-uav01",
+      "src": "gs",
+      "dst": "uav01",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav01.txt"
+    },
+    {
+      "id": "gs-uav02",
+      "src": "gs",
+      "dst": "uav02",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav02.txt"
+    },
+    {
+      "id": "gs-uav03",
+      "src": "gs",
+      "dst": "uav03",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav03.txt"
+    },
+    {
+      "id": "gs-uav04",
+      "src": "gs",
+      "dst": "uav04",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav04.txt"
+    },
+    {
+      "id": "gs-uav05",
+      "src": "gs",
+      "dst": "uav05",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav05.txt"
+    },
+    {
+      "id": "gs-uav06",
+      "src": "gs",
+      "dst": "uav06",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav06.txt"
+    }
+  ],
+  "ui": {
+    "layout": "l2_link_mesh_2x3",
+    "node_positions": {
+      "gs": {
+        "x": 0,
+        "y": 0
+      },
+      "uav01": {
+        "x": -320,
+        "y": -160
+      },
+      "uav02": {
+        "x": -220,
+        "y": -220
+      },
+      "uav03": {
+        "x": -120,
+        "y": -160
+      },
+      "uav04": {
+        "x": 120,
+        "y": 160
+      },
+      "uav05": {
+        "x": 220,
+        "y": 220
+      },
+      "uav06": {
+        "x": 320,
+        "y": 160
+      }
+    }
+  },
+  "mesh_links": [
+    {
+      "id": "uav01-uav02",
+      "src": "uav01",
+      "dst": "uav02",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav02.txt"
+    },
+    {
+      "id": "uav01-uav03",
+      "src": "uav01",
+      "dst": "uav03",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav03.txt"
+    },
+    {
+      "id": "uav01-uav04",
+      "src": "uav01",
+      "dst": "uav04",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav04.txt"
+    },
+    {
+      "id": "uav01-uav05",
+      "src": "uav01",
+      "dst": "uav05",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav05.txt"
+    },
+    {
+      "id": "uav01-uav06",
+      "src": "uav01",
+      "dst": "uav06",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav06.txt"
+    },
+    {
+      "id": "uav02-uav03",
+      "src": "uav02",
+      "dst": "uav03",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav03.txt"
+    },
+    {
+      "id": "uav02-uav04",
+      "src": "uav02",
+      "dst": "uav04",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav04.txt"
+    },
+    {
+      "id": "uav02-uav05",
+      "src": "uav02",
+      "dst": "uav05",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav05.txt"
+    },
+    {
+      "id": "uav02-uav06",
+      "src": "uav02",
+      "dst": "uav06",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav06.txt"
+    },
+    {
+      "id": "uav03-uav04",
+      "src": "uav03",
+      "dst": "uav04",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav03_uav04.txt"
+    },
+    {
+      "id": "uav03-uav05",
+      "src": "uav03",
+      "dst": "uav05",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav03_uav05.txt"
+    },
+    {
+      "id": "uav03-uav06",
+      "src": "uav03",
+      "dst": "uav06",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav03_uav06.txt"
+    },
+    {
+      "id": "uav04-uav05",
+      "src": "uav04",
+      "dst": "uav05",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav04_uav05.txt"
+    },
+    {
+      "id": "uav04-uav06",
+      "src": "uav04",
+      "dst": "uav06",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav04_uav06.txt"
+    },
+    {
+      "id": "uav05-uav06",
+      "src": "uav05",
+      "dst": "uav06",
+      "enabled": true,
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav05_uav06.txt"
+    }
+  ]
+}
