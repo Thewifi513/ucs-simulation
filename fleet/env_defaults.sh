@@ -99,6 +99,43 @@ UCS_P4_COMPILER_IMAGE="${UCS_P4_COMPILER_IMAGE:-ucs-p4-compiler:20260625}"
 UCS_GZ_HELPER_BACKEND="${UCS_GZ_HELPER_BACKEND:-auto}"
 UCS_GZ_HELPER_IMAGE="${UCS_GZ_HELPER_IMAGE:-$UCS_GAZEBO_IMAGE}"
 UCS_GZ_HELPER_DOCKER_GPU="${UCS_GZ_HELPER_DOCKER_GPU:-${UCS_GAZEBO_DOCKER_GPU:-0}}"
+UCS_DOCKER_GPU_MODE="${UCS_DOCKER_GPU_MODE:-auto}"
+
+ucs_docker_nvidia_runtime_available() {
+  command -v docker >/dev/null 2>&1 || return 1
+  docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'
+}
+
+ucs_docker_gpu_args() {
+  local caps="${1:-compute,utility,graphics,video}"
+  local mode="${UCS_DOCKER_GPU_MODE:-auto}"
+  local visible="${NVIDIA_VISIBLE_DEVICES:-all}"
+
+  case "$mode" in
+    runtime)
+      printf '%s\n' \
+        "--runtime" "nvidia" \
+        "-e" "NVIDIA_VISIBLE_DEVICES=${visible}" \
+        "-e" "NVIDIA_DRIVER_CAPABILITIES=${caps}"
+      ;;
+    gpus)
+      printf '%s\n' \
+        "--gpus" "all" \
+        "-e" "NVIDIA_DRIVER_CAPABILITIES=${caps}"
+      ;;
+    auto|"")
+      if ucs_docker_nvidia_runtime_available; then
+        UCS_DOCKER_GPU_MODE=runtime ucs_docker_gpu_args "$caps"
+      else
+        UCS_DOCKER_GPU_MODE=gpus ucs_docker_gpu_args "$caps"
+      fi
+      ;;
+    *)
+      echo "[env_defaults][ERR] unsupported UCS_DOCKER_GPU_MODE=${mode}; use auto, gpus, or runtime" >&2
+      return 1
+      ;;
+  esac
+}
 
 export UCS_MESH_DIR UCS_SCRIPTS_ROOT UCS_ROOT UCS_WORKSPACE_ROOT
 export PX4_DIR NS3_DIR GZ_ENV_SH PX4_GZ_MODELS PX4_GZ_WORLDS
@@ -106,3 +143,4 @@ export UCS_VENV_DIR PYTHON_BIN
 export UCS_UAV_BASE_IMAGE UCS_MESH_BMV2_IMAGE UCS_GAZEBO_IMAGE
 export UCS_MESH_P4RUNTIME_IMAGE UCS_P4C_IMAGE UCS_BMV2_RUNTIME_IMAGE UCS_P4_COMPILER_IMAGE
 export UCS_GZ_HELPER_BACKEND UCS_GZ_HELPER_IMAGE UCS_GZ_HELPER_DOCKER_GPU
+export UCS_DOCKER_GPU_MODE

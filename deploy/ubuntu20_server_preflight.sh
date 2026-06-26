@@ -235,7 +235,7 @@ docker_cmd_ok_with_helper_gpu() {
   shift
   local gpu_args=()
   if docker_helper_gpu_enabled; then
-    gpu_args=(--gpus all -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video)
+    mapfile -t gpu_args < <(ucs_docker_gpu_args "compute,utility,graphics,video")
   fi
   docker run --rm "${gpu_args[@]}" --entrypoint "$1" "$image" "${@:2}" >/dev/null 2>&1
 }
@@ -488,12 +488,16 @@ if [[ -n "$PYTHON_FOR_CHECK" && -x "$PYTHON_FOR_CHECK" ]]; then
   ok "platform Python: ${PYTHON_FOR_CHECK}"
   if "$PYTHON_FOR_CHECK" - <<'PY' >/dev/null 2>&1
 import sys
-raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)
+from pathlib import Path
+
+is_venv = sys.prefix != sys.base_prefix
+is_conda = (Path(sys.prefix) / "conda-meta").is_dir()
+raise SystemExit(0 if is_venv or is_conda else 1)
 PY
   then
-    ok "platform Python is a virtual environment"
+    ok "platform Python is an isolated environment"
   else
-    warn "platform Python is not a virtual environment; create ${UCS_VENV_DIR} and set PYTHON_BIN for server migration"
+    warn "platform Python is not an isolated environment; create ${UCS_VENV_DIR} and set PYTHON_BIN for server migration"
   fi
 else
   fail "no executable Python found for module checks"

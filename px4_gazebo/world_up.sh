@@ -547,10 +547,8 @@ PY
     docker_gpu_env_args=()
     docker_gpu_mount_args=()
     if [[ "$GAZEBO_DOCKER_GPU_ENABLED" -eq 1 ]]; then
-      docker_gpu_args=(--gpus all)
+      mapfile -t docker_gpu_args < <(ucs_docker_gpu_args "${NVIDIA_DRIVER_CAPABILITIES:-graphics,compute,utility,display,video}")
       docker_gpu_env_args+=(
-        -e NVIDIA_VISIBLE_DEVICES="${NVIDIA_VISIBLE_DEVICES:-all}"
-        -e NVIDIA_DRIVER_CAPABILITIES="${NVIDIA_DRIVER_CAPABILITIES:-graphics,compute,utility,display}"
         -e __GLX_VENDOR_LIBRARY_NAME="${__GLX_VENDOR_LIBRARY_NAME:-nvidia}"
       )
       HOST_NVIDIA_EGL_VENDOR_FILE="${UCS_GAZEBO_DOCKER_EGL_VENDOR_FILE:-/usr/share/glvnd/egl_vendor.d/10_nvidia.json}"

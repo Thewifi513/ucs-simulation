@@ -409,7 +409,7 @@ safe_name() {
 docker_gpu_args() {
   case "$GZ_HELPER_DOCKER_GPU" in
     1|true|True|TRUE|yes|Yes|YES|on|On|ON)
-      printf '%s\n' "--gpus" "all" "-e" "NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video"
+      ucs_docker_gpu_args "compute,utility,graphics,video"
       ;;
   esac
 }

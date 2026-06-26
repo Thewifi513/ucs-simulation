@@ -1,0 +1,11 @@
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.p4 text eol=lf
+*.cc text eol=lf
+*.sdf text eol=lf
+Dockerfile text eol=lf
+
+*.png binary
+control/mavsdk_server_musl_x86_64 binary
