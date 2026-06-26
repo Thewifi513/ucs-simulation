@@ -30,6 +30,73 @@ set +u
 source "$GZ_ENV_SH"
 set -u
 
+ucs_normalize_px4_path() {
+  local path="${1:-}"
+  if [[ -z "$path" ]]; then
+    return 0
+  fi
+  if [[ "$path" == "$PX4_DIR" || "$path" == "$PX4_DIR"/* ]]; then
+    printf '%s' "$path"
+    return 0
+  fi
+  case "$path" in
+    */PX4-Autopilot/*)
+      printf '%s%s' "$PX4_DIR" "${path#*/PX4-Autopilot}"
+      ;;
+    */PX4-Autopilot)
+      printf '%s' "$PX4_DIR"
+      ;;
+    *)
+      printf '%s' "$path"
+      ;;
+  esac
+}
+
+ucs_normalize_px4_path_list() {
+  local input="${1:-}"
+  local output=""
+  local entry normalized
+  [[ -n "$input" ]] || return 0
+  local old_ifs="$IFS"
+  IFS=:
+  for entry in $input; do
+    normalized="$(ucs_normalize_px4_path "$entry")"
+    [[ -n "$normalized" ]] || continue
+    case ":$output:" in
+      *:"$normalized":*) continue ;;
+    esac
+    output="${output:+$output:}$normalized"
+  done
+  IFS="$old_ifs"
+  printf '%s' "$output"
+}
+
+ucs_normalize_px4_env_path_list() {
+  local name="$1"
+  local old_value="${!name:-}"
+  local new_value
+  [[ -n "$old_value" ]] || return 0
+  new_value="$(ucs_normalize_px4_path_list "$old_value")"
+  if [[ "$new_value" != "$old_value" ]]; then
+    printf -v "$name" '%s' "$new_value"
+    export "$name"
+    echo "[gazebo-runtime] normalized $name for PX4_DIR=$PX4_DIR"
+  fi
+}
+
+ucs_normalize_px4_env_path() {
+  local name="$1"
+  local old_value="${!name:-}"
+  local new_value
+  [[ -n "$old_value" ]] || return 0
+  new_value="$(ucs_normalize_px4_path "$old_value")"
+  if [[ "$new_value" != "$old_value" ]]; then
+    printf -v "$name" '%s' "$new_value"
+    export "$name"
+    echo "[gazebo-runtime] normalized $name for PX4_DIR=$PX4_DIR"
+  fi
+}
+
 export GZ_PARTITION GZ_IP
 if [[ -n "$UCS_INCOMING_GZ_SIM_SERVER_CONFIG_PATH" ]]; then
   export GZ_SIM_SERVER_CONFIG_PATH="$UCS_INCOMING_GZ_SIM_SERVER_CONFIG_PATH"
@@ -46,6 +113,15 @@ fi
 if [[ -n "$UCS_GAZEBO_RESOURCE_PATH_PREFIX" ]]; then
   export GZ_SIM_RESOURCE_PATH="${UCS_GAZEBO_RESOURCE_PATH_PREFIX}${GZ_SIM_RESOURCE_PATH:+:${GZ_SIM_RESOURCE_PATH}}"
 fi
+for ucs_path_var in \
+  GZ_SIM_SYSTEM_PLUGIN_PATH \
+  GZ_SIM_RESOURCE_PATH \
+  IGN_GAZEBO_SYSTEM_PLUGIN_PATH \
+  IGN_GAZEBO_RESOURCE_PATH \
+  LD_LIBRARY_PATH; do
+  ucs_normalize_px4_env_path_list "$ucs_path_var"
+done
+ucs_normalize_px4_env_path GZ_SIM_SERVER_CONFIG_PATH
 if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
   export XDG_RUNTIME_DIR="/tmp/xdg-runtime-${UID:-0}"
   mkdir -p "$XDG_RUNTIME_DIR"

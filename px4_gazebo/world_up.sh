@@ -240,6 +240,9 @@ cat >"$A_SH" <<'EOF2'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# shellcheck disable=SC1091
+source "${MESH_DIR}/fleet/env_defaults.sh"
+
 WORLD_DOCKER_CONTAINER="${UCS_GAZEBO_CONTAINER_NAME:-ucs-gazebo-${SCENARIO_ID:-default}}"
 
 world_cleanup() {
