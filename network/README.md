@@ -37,6 +37,14 @@ ns3/ucs_fleet_l2_mesh_topology.cc  当前 ns-3 scratch 源码
 ./network/metrics_up.sh --bg
 ```
 
+Ubuntu 20 宿主机缺 Gazebo Python binding 时，使用 Docker helper 读取 `/clock` 和 pose：
+
+```bash
+UCS_GZ_HELPER_BACKEND=docker ./network/metrics_up.sh --bg
+```
+
+Docker helper 会使用 `ucs-gazebo-runtime:20260625`、host network、宿主 `/tmp` 和 `/dev/shm`，因此 ns-3 读取的 sim time、共享内存 metrics 和旧文本 metrics 路径不变。
+
 停止 metrics：
 
 ```bash
@@ -69,4 +77,5 @@ cd "$NS3_DIR"
 - 新网络拓扑应扩展 `instances[]`、`links[]`、`mesh_links[]`，不要在 `net_up.sh` 中写死节点。
 - `net_up.sh --ready-file FILE` 是给 `fleet_up.sh` 等上层编排使用的同步接口。
 - `metrics_channel=shm` 是当前高频链路 metrics 通道，旧文本文件只作为兼容和调试输出。
+- `UCS_GZ_HELPER_BACKEND=auto|host|docker` 是 Gazebo transport helper 预留口；Ubuntu 20 服务器推荐 `docker`。
 - BMv2 接入由拓扑 `programmable_net` 控制，可用 `UCS_MESH_DISABLE_BMV2=1` 做 Linux/ns-3 对比实验。

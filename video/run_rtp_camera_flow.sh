@@ -22,6 +22,9 @@ DST_IP_OVERRIDE=""
 PORT_OVERRIDE=""
 PRINT_PIPELINE=0
 FLOW_KEYS=()
+GZ_HELPER_BACKEND="${UCS_GZ_HELPER_BACKEND:-auto}"
+GZ_HELPER_IMAGE="${UCS_GZ_HELPER_IMAGE:-$UCS_GAZEBO_IMAGE}"
+GZ_HELPER_DOCKER_GPU="${UCS_GZ_HELPER_DOCKER_GPU:-0}"
 
 usage() {
   cat <<EOF
@@ -51,6 +54,11 @@ Options:
   --print-pipeline      Print the GStreamer pipeline used by each bridge.
   --dry-run             Resolve and print commands without starting streams.
   --help                Show this help.
+
+Environment:
+  UCS_GZ_HELPER_BACKEND=auto|host|docker  Default: ${GZ_HELPER_BACKEND}
+  UCS_GZ_HELPER_IMAGE=IMAGE               Default: ${GZ_HELPER_IMAGE}
+  UCS_GZ_HELPER_DOCKER_GPU=0|1            Default: ${GZ_HELPER_DOCKER_GPU}
 
 Viewer example for uav04:
   gst-launch-1.0 udpsrc address=10.10.0.254 port=5604 \\
@@ -159,8 +167,45 @@ fi
 need_cmd "$PYTHON_BIN"
 need_cmd docker
 need_cmd ip
-need_cmd nsenter
-need_cmd sudo
+
+python_has_video_deps() {
+  "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+import gi
+import gz.transport13
+import gz.msgs10
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+PY
+}
+
+resolve_gz_helper_backend() {
+  case "$GZ_HELPER_BACKEND" in
+    host)
+      python_has_video_deps || die "UCS_GZ_HELPER_BACKEND=host but $PYTHON_BIN cannot import gi/Gst and gz.transport13/gz.msgs10"
+      need_cmd nsenter
+      need_cmd sudo
+      printf '%s\n' host
+      ;;
+    docker)
+      docker image inspect "$GZ_HELPER_IMAGE" >/dev/null 2>&1 || die "helper image not found: $GZ_HELPER_IMAGE"
+      printf '%s\n' docker
+      ;;
+    auto)
+      if python_has_video_deps && command -v nsenter >/dev/null 2>&1; then
+        need_cmd sudo
+        printf '%s\n' host
+      else
+        docker image inspect "$GZ_HELPER_IMAGE" >/dev/null 2>&1 || die "host Gazebo/GStreamer Python deps unavailable and helper image not found: $GZ_HELPER_IMAGE"
+        printf '%s\n' docker
+      fi
+      ;;
+    *)
+      die "unsupported UCS_GZ_HELPER_BACKEND=$GZ_HELPER_BACKEND"
+      ;;
+  esac
+}
+
+HELPER_BACKEND="$(resolve_gz_helper_backend)"
 
 TOPOLOGY_FILE="$("$PYTHON_BIN" -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$TOPOLOGY_FILE")"
 BRIDGE_PY="$("$PYTHON_BIN" -c 'import os,sys; print(os.path.abspath(sys.argv[1]))' "$BRIDGE_PY")"
@@ -300,11 +345,16 @@ mkdir -p "$RUN_DIR"
 
 declare -a CHILD_PIDS=()
 declare -a CHILD_LABELS=()
+declare -a CHILD_CONTAINERS=()
 
 cleanup_children() {
   local pid
   for pid in "${CHILD_PIDS[@]:-}"; do
     kill "$pid" >/dev/null 2>&1 || true
+  done
+  local helper_container
+  for helper_container in "${CHILD_CONTAINERS[@]:-}"; do
+    docker rm -f "$helper_container" >/dev/null 2>&1 || true
   done
 }
 
@@ -352,6 +402,18 @@ preflight_runtime() {
   fi
 }
 
+safe_name() {
+  printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_'
+}
+
+docker_gpu_args() {
+  case "$GZ_HELPER_DOCKER_GPU" in
+    1|true|True|TRUE|yes|Yes|YES|on|On|ON)
+      printf '%s\n' "--gpus" "all" "-e" "NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video"
+      ;;
+  esac
+}
+
 start_stream() {
   local line="$1"
   local scenario_id gz_partition flow_key flow_label out_width out_height bitrate fps uav_id idx container exp_if bind_ip dst_ip dst_port topic
@@ -367,7 +429,7 @@ start_stream() {
   echo "[rtp-flow] ${uav_id}/${flow_label}: viewer=${viewer_cmd}"
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "[rtp-flow] ${uav_id}/${flow_label}: dry-run only; runtime command needs the running container pid and eth0 Gazebo IP"
+    echo "[rtp-flow] ${uav_id}/${flow_label}: helper=${HELPER_BACKEND} (${GZ_HELPER_IMAGE}); dry-run only"
     return 0
   fi
 
@@ -377,28 +439,64 @@ start_stream() {
 
   local gz_ip
   gz_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container" 2>/dev/null || true)"
-  local nsenter_cmd=(nsenter -t "$container_pid" -n)
-  if ! "${nsenter_cmd[@]}" true >/dev/null 2>&1; then
-    if sudo -n true >/dev/null 2>&1; then
-      nsenter_cmd=(sudo -n nsenter -t "$container_pid" -n)
-    elif [[ -t 0 ]]; then
-      echo "[rtp-flow] sudo credential required for nsenter; requesting sudo -v ..."
-      sudo -v
-      nsenter_cmd=(sudo -n nsenter -t "$container_pid" -n)
-    else
-      die "nsenter requires sudo for ${container}; run 'sudo -v' first or launch from a terminal with sudo"
+  local nsenter_cmd=()
+  if [[ "$HELPER_BACKEND" == "host" ]]; then
+    nsenter_cmd=(nsenter -t "$container_pid" -n)
+    if ! "${nsenter_cmd[@]}" true >/dev/null 2>&1; then
+      if sudo -n true >/dev/null 2>&1; then
+        nsenter_cmd=(sudo -n nsenter -t "$container_pid" -n)
+      elif [[ -t 0 ]]; then
+        echo "[rtp-flow] sudo credential required for nsenter; requesting sudo -v ..."
+        sudo -v
+        nsenter_cmd=(sudo -n nsenter -t "$container_pid" -n)
+      else
+        die "nsenter requires sudo for ${container}; run 'sudo -v' first or launch from a terminal with sudo"
+      fi
     fi
   fi
   if [[ -z "$gz_ip" ]]; then
-    gz_ip="$("${nsenter_cmd[@]}" ip -4 -o addr show eth0 | awk '{print $4}' | cut -d/ -f1)"
+    if [[ "$HELPER_BACKEND" == "host" ]]; then
+      gz_ip="$("${nsenter_cmd[@]}" ip -4 -o addr show eth0 | awk '{print $4}' | cut -d/ -f1)"
+    else
+      die "cannot resolve ${container} eth0 IP for Gazebo transport"
+    fi
   fi
   [[ -n "$gz_ip" ]] || die "cannot resolve ${container} eth0 IP for Gazebo transport"
 
-  local bridge_cmd=(
-    "${nsenter_cmd[@]}"
-    env "GZ_PARTITION=${gz_partition}" "GZ_IP=${gz_ip}"
-    "$PYTHON_BIN" "$BRIDGE_PY"
-    --source-mode camera
+  local bridge_cmd=()
+  local helper_container=""
+  case "$HELPER_BACKEND" in
+    host)
+      bridge_cmd=(
+        "${nsenter_cmd[@]}"
+        env "GZ_PARTITION=${gz_partition}" "GZ_IP=${gz_ip}"
+        "$PYTHON_BIN" "$BRIDGE_PY"
+        --source-mode camera
+      )
+      ;;
+    docker)
+      helper_container="ucs-rtp-$(safe_name "${scenario_id}-${uav_id}-${flow_key}")"
+      docker rm -f "$helper_container" >/dev/null 2>&1 || true
+      local gpu_args=()
+      mapfile -t gpu_args < <(docker_gpu_args)
+      bridge_cmd=(
+        docker run --rm
+        --name "$helper_container"
+        --network "container:${container}"
+        --user "$(id -u):$(id -g)"
+        -v "${MESH_DIR}:${MESH_DIR}:ro"
+        -e "GZ_PARTITION=${gz_partition}"
+        -e "GZ_IP=${gz_ip}"
+        "${gpu_args[@]}"
+        --entrypoint python3
+        "$GZ_HELPER_IMAGE"
+        "$BRIDGE_PY"
+        --source-mode camera
+      )
+      CHILD_CONTAINERS+=("$helper_container")
+      ;;
+  esac
+  bridge_cmd+=(
     --topic "$topic"
     --dst-ip "$dst_ip"
     --dst-port "$dst_port"
@@ -415,7 +513,11 @@ start_stream() {
     bridge_cmd+=(--print-pipeline)
   fi
 
+  echo "[rtp-flow] ${uav_id}/${flow_label}: helper=${HELPER_BACKEND} image=${GZ_HELPER_IMAGE}"
   echo "[rtp-flow] ${uav_id}/${flow_label}: container=${container} pid=${container_pid} exp_if=${exp_if} GZ_IP=${gz_ip}"
+  if [[ -n "$helper_container" ]]; then
+    echo "[rtp-flow] ${uav_id}/${flow_label}: helper_container=${helper_container} network=container:${container} gpu=${GZ_HELPER_DOCKER_GPU}"
+  fi
 
   if [[ "${#STREAM_LINES[@]}" -eq 1 ]]; then
     "${bridge_cmd[@]}"
@@ -433,6 +535,7 @@ start_stream() {
 echo "[rtp-flow] topology=$TOPOLOGY_FILE"
 echo "[rtp-flow] run_dir=$RUN_DIR"
 echo "[rtp-flow] flows=${FLOW_KEYS[*]} encoder=$VIDEO_ENCODER bitrate_override=${BITRATE_KBPS:-auto} fps_override=${FPS:-auto}"
+echo "[rtp-flow] helper=${HELPER_BACKEND} image=${GZ_HELPER_IMAGE} gpu=${GZ_HELPER_DOCKER_GPU}"
 if [[ "$DRY_RUN" -eq 0 ]]; then
   preflight_runtime
 fi

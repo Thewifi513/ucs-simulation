@@ -45,6 +45,16 @@ sudo -v
 ./video/run_rtp_camera_flow.sh --uav uav04 --encoder x264
 ```
 
+Ubuntu 20 宿主机缺 Gazebo Python binding 或 GStreamer Python binding 时，使用 Docker helper：
+
+```bash
+UCS_GZ_HELPER_BACKEND=docker \
+UCS_GZ_HELPER_DOCKER_GPU=1 \
+./video/run_rtp_camera_flow.sh --uav uav04 --encoder hard
+```
+
+Docker helper 使用 `--network container:uavNN` 共享对应 UAV 容器网络命名空间，RTP 源地址仍是 UAV 实验网 IP，业务流继续经过 BMv2/ns-3。
+
 GS 侧直接查看 RTP：
 
 ```bash
@@ -67,4 +77,5 @@ gst-launch-1.0 udpsrc address=10.10.0.254 port=5604 \
 - 新增码流类型时，在拓扑中增加新的 flow key，然后通过 `--flow <key>` 启动。
 - `--print-pipeline` 用于暴露实际 GStreamer pipeline，便于后续前端或调试接口展示。
 - `--encoder auto|hard|nvh264enc|nvautogpuh264enc|nvcudah264enc|va|vaapi|v4l2|openh264enc|x264` 是当前编码器扩展口。
+- `UCS_GZ_HELPER_BACKEND=auto|host|docker` 控制相机桥运行位置；Docker 模式需要运行中的 UAV 容器。
 - 多路硬编受 NVENC session 和宿主 GPU 状态影响，`fleet_down.sh` 会按视频端口清理新旧路径残留，避免旧进程占用编码器。

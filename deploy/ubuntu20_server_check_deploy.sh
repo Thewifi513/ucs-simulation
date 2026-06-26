@@ -65,6 +65,8 @@ Options:
 Typical server flow:
   export PX4_DIR=/path/to/PX4-Autopilot
   export NS3_DIR=/path/to/ns-3
+  export UCS_GZ_HELPER_BACKEND=docker
+  export UCS_GZ_HELPER_DOCKER_GPU=1
   ./deploy/ubuntu20_server_check_deploy.sh deploy --image-tar ./ucs-runtime-images-20260625.tar
   export PYTHON_BIN=/path/to/ucs/.venv/bin/python
   ./deploy/ubuntu20_server_check_deploy.sh check --strict
@@ -233,7 +235,7 @@ check_platform_python() {
   [[ -x "$PYTHON_BIN" ]] || die "PYTHON_BIN is not executable: ${PYTHON_BIN}"
   "$PYTHON_BIN" - <<'PY'
 import sys
-modules = ["gz.transport13", "gz.msgs10", "mavsdk", "websockets"]
+modules = ["mavsdk", "websockets"]
 missing = []
 for module in modules:
     try:
@@ -248,6 +250,7 @@ if missing:
 if sys.prefix == sys.base_prefix:
     print("[ucs-deploy][WARN] platform Python is not a virtual environment", file=sys.stderr)
 PY
+  log "Gazebo transport/GStreamer helper dependencies are checked by ubuntu20_server_preflight.sh"
 }
 
 prepare_venv() {

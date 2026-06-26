@@ -59,11 +59,16 @@ python3 -m venv --system-site-packages .venv
 python -m pip install --upgrade pip
 python -m pip install -r ./ucs-simulation/requirements.txt
 python - <<'PY'
-import gz.transport13
-import gz.msgs10
 import mavsdk
 import websockets
 PY
+```
+
+Ubuntu 20 宿主机无法直接提供 Gazebo Python binding 时，使用 Docker helper：
+
+```bash
+export UCS_GZ_HELPER_BACKEND=docker
+export UCS_GZ_HELPER_DOCKER_GPU=1
 ```
 
 导出固定运行时镜像：
@@ -102,3 +107,4 @@ ucs-runtime-images-20260625.tar.sha256
 - `--strict` 可用于 CI 或交付前检查，让 warning 也变成非零退出。
 - 所有路径都应通过 `PX4_DIR`、`NS3_DIR`、`PYTHON_BIN`、`MAVSDK_SERVER_BIN` 等变量覆盖，不要在部署脚本写死本机路径。
 - 服务器运行时所有宿主机 Python 入口都应走平台 venv；系统 `python3` 只保留为开发机兜底。
+- `UCS_GZ_HELPER_BACKEND=auto|host|docker` 控制 metrics/video 的 Gazebo transport helper；Ubuntu 20 推荐 `docker`。

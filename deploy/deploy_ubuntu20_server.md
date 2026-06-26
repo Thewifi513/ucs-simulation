@@ -98,11 +98,11 @@ GStreamer runtime 和插件:
   NVIDIA H.264 编码/解码插件，用于硬编硬解
 Gazebo Harmonic runtime，与 PX4 当前 gz transport 栈匹配
 平台专用 Python venv:
-  PyGObject/GStreamer bindings
-  gz.transport13
-  gz.msgs10
   mavsdk
   websockets
+Gazebo helper runtime:
+  host Python 可导入 gz.transport13/gz.msgs10 和 gi.repository.Gst，或
+  Docker 镜像 ucs-gazebo-runtime:20260625 提供这些能力
 PX4-Autopilot checkout/build:
   build/px4_sitl_default/rootfs/gz_env.sh
 ns-3 checkout/build:
@@ -128,7 +128,7 @@ ucs-simulation/.venv/bin/python
 python3，仅作为开发机兜底
 ```
 
-推荐在 `ucs/` 根目录创建平台专用 venv。因为 `gz.transport13` 和 `gz.msgs10` 通常来自 Gazebo/Ubuntu 系统包，venv 要使用 `--system-site-packages`：
+推荐在 `ucs/` 根目录创建平台专用 venv。控制链路需要 `mavsdk/websockets`；Gazebo transport 和 GStreamer helper 可以由 Docker runtime 提供：
 
 ```bash
 cd /path/to/ucs
@@ -137,8 +137,6 @@ python3 -m venv --system-site-packages .venv
 python -m pip install --upgrade pip
 python -m pip install -r ./ucs-simulation/requirements.txt
 python - <<'PY'
-import gz.transport13
-import gz.msgs10
 import mavsdk
 import websockets
 PY
@@ -149,6 +147,22 @@ PY
 ```bash
 export PYTHON_BIN=/path/to/ucs/.venv/bin/python
 ```
+
+## Gazebo helper 后端
+
+`metrics_worker.py` 和 `rtp_camera_bridge.py` 需要 Gazebo transport Python binding。Ubuntu 20 宿主机通常不适合硬混 `gz.transport13/gz.msgs10` 的新包，因此默认支持 helper Docker：
+
+```bash
+export UCS_GZ_HELPER_BACKEND=docker
+export UCS_GZ_HELPER_IMAGE=ucs-gazebo-runtime:20260625
+export UCS_GZ_HELPER_DOCKER_GPU=1
+```
+
+`metrics_up.sh` 在 Docker helper 模式下使用 host network，并挂载 `/tmp`、`/dev/shm`，所以 ns-3 仍读取宿主机同一份 sim time 和 metrics 文件。
+
+`run_rtp_camera_flow.sh` 在 Docker helper 模式下使用 `--network container:uavNN`，共享对应 UAV 容器网络命名空间。RTP 源地址仍绑定 UAV 实验网 IP，业务流继续经过 BMv2/ns-3，不会从宿主机旁路。
+
+`UCS_GZ_HELPER_BACKEND=auto` 会优先使用宿主 helper；宿主缺依赖时自动改用 Docker helper。服务器部署建议显式设为 `docker`，减少 Ubuntu 20 系统包风险。
 
 ## 路径默认值
 
@@ -292,7 +306,7 @@ sudo -v
 ## Ubuntu 20 风险点
 
 - Gazebo Harmonic 和新 PX4 文档通常面向更新 Ubuntu，Ubuntu 20 原生安装更容易脆。
-- 当前脚本使用 `gz.transport13`、`gz.msgs10`、`mavsdk` 和 `websockets`，必须在同一个平台 venv 内可导入。
+- `mavsdk` 和 `websockets` 必须在平台 venv 内可导入；`gz.transport13/gz.msgs10` 建议交给 `ucs-gazebo-runtime` helper Docker。
 - Docker+GPU headless Gazebo 需要确认 EGL/NVIDIA 渲染路径，否则相机 FPS 可能被 Mesa/LLVM 拖到很低。
 - 默认会启动六路 960x540@30 子流。1080p 主流建议确认 NVENC 并发能力后再打开。
 - 服务器上尽量使用 `--terminal-mode minimal`，GUI terminal 不是服务器路径的必要依赖。

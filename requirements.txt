@@ -1,5 +1,5 @@
 # Python packages installed into the platform venv.
-# Gazebo transport/messages and PyGObject/GStreamer bindings are provided by
-# system packages on the target host and are checked separately by deploy tools.
+# Gazebo transport/messages and PyGObject/GStreamer bindings may be provided by
+# the ucs-gazebo-runtime Docker helper on Ubuntu 20 deployments.
 mavsdk
 websockets

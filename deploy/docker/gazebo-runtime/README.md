@@ -1,8 +1,8 @@
 # Gazebo Runtime 镜像
 
-这是 UCS BMv2 mesh 平台的实验性 headless Gazebo server 镜像。
+这是 UCS BMv2 mesh 平台的 headless Gazebo server 和 Gazebo Python helper 镜像。
 
-这个容器只负责产生 Gazebo world、相机话题和 `/clock`。PX4 容器、metrics、RTP 视频注入、BMv2 和 ns-3 仍在容器外按原平台链路运行。
+这个容器负责产生 Gazebo world、相机话题和 `/clock`。在 Ubuntu 20 服务器上，它也可以为 metrics 和 RTP 相机桥提供 `gz.transport13/gz.msgs10`、PyGObject/GStreamer 和 NVENC 插件，避免宿主机硬装新 Gazebo Python 包。
 
 ## 使用方式
 
@@ -13,6 +13,8 @@
 ```bash
 ./deploy/docker/gazebo-runtime/build_image.sh
 ```
+
+当前镜像构建脚本默认 `DOCKER_BUILDKIT=0` 和 `DOCKER_BUILD_NETWORK=host`。这是为了避开部分 Docker/BuildKit 环境里 `/etc/resolv.conf` 只读且 `_apt` 读不到 DNS 配置的问题。
 
 只启动 world：
 
@@ -51,6 +53,14 @@ Docker+GPU 模式下，`fleet_up.sh` 默认使用硬编硬解：
 ```text
 VIDEO_ENCODER=hard
 DASHBOARD_VIDEO_DECODER=hard
+```
+
+如果 metrics/video helper 也走 Docker，建议同样打开 helper GPU：
+
+```bash
+UCS_GZ_HELPER_BACKEND=docker \
+UCS_GZ_HELPER_DOCKER_GPU=1 \
+./fleet/fleet_up.sh --headless
 ```
 
 显式允许软件 fallback：
@@ -96,8 +106,10 @@ UCS_GAZEBO_CAMERA_PROFILE=1080p \
 
 - Gazebo 容器使用 `--network host`。
 - `GZ_PARTITION` 和 `GZ_IP` 由 `world_up.sh` 传入。
+- metrics helper Docker 使用 host network，并挂载宿主 `/tmp` 和 `/dev/shm`。
+- RTP video helper Docker 使用 `--network container:uavNN`，共享 UAV 容器网络命名空间，业务流继续经过 BMv2/ns-3。
 - Docker headless 默认禁用 PX4 `GstCameraSystem` 和 `OpticalFlowSystem`，因为本平台通过 `rtp_camera_bridge.py` 输出视频。
 - 如确需 PX4 插件，可设置 `UCS_GAZEBO_DISABLE_GST_CAMERA_SYSTEM=off` 或 `UCS_GAZEBO_DISABLE_OPTICAL_FLOW_SYSTEM=off`。
 - 默认情况下，禁用这些 PX4 自定义插件后，`UCS_GAZEBO_DOCKER_HOST_LIBS=auto` 不再挂载宽泛的 `/ucs-host-libs`。只有缺库时才显式设为 `on`。
 - 启动器会挂载 PX4 树、当前 `ucs-simulation` 目录、world SDF 目录和生成的 headless server config。
-- RTP 视频仍由每架 UAV namespace 内的 `rtp_camera_bridge.py` 产生，因此业务流继续经过 BMv2/ns-3。
+- `UCS_GZ_HELPER_BACKEND=auto|host|docker` 控制 helper 运行位置；Ubuntu 20 迁移推荐显式 `docker`。

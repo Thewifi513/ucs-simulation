@@ -187,6 +187,59 @@ check_python_import() {
   fi
 }
 
+python_import_ok() {
+  local python_bin="$1"
+  local module="$2"
+  "$python_bin" -c "import ${module}" >/dev/null 2>&1
+}
+
+python_gst_ok() {
+  local python_bin="$1"
+  "$python_bin" - <<'PY' >/dev/null 2>&1
+import gi
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+PY
+}
+
+docker_python_import_ok() {
+  local image="$1"
+  local module="$2"
+  docker run --rm --entrypoint python3 "$image" -c "import ${module}" >/dev/null 2>&1
+}
+
+docker_python_gst_ok() {
+  local image="$1"
+  docker run --rm --entrypoint python3 "$image" - <<'PY' >/dev/null 2>&1
+import gi
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst
+PY
+}
+
+docker_cmd_ok() {
+  local image="$1"
+  shift
+  docker run --rm --entrypoint "$1" "$image" "${@:2}" >/dev/null 2>&1
+}
+
+docker_helper_gpu_enabled() {
+  case "${UCS_GZ_HELPER_DOCKER_GPU:-0}" in
+    1|true|True|TRUE|yes|Yes|YES|on|On|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+docker_cmd_ok_with_helper_gpu() {
+  local image="$1"
+  shift
+  local gpu_args=()
+  if docker_helper_gpu_enabled; then
+    gpu_args=(--gpus all -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,video)
+  fi
+  docker run --rm "${gpu_args[@]}" --entrypoint "$1" "$image" "${@:2}" >/dev/null 2>&1
+}
+
 check_docker_image() {
   local image="$1"
   [[ -n "$image" ]] || return 0
@@ -442,10 +495,99 @@ PY
   else
     warn "platform Python is not a virtual environment; create ${UCS_VENV_DIR} and set PYTHON_BIN for server migration"
   fi
-  check_python_import "$PYTHON_FOR_CHECK" "gz.transport13" warn "Gazebo Python transport"
-  check_python_import "$PYTHON_FOR_CHECK" "gz.msgs10" warn "Gazebo Python messages"
 else
   fail "no executable Python found for module checks"
+fi
+
+section "Gazebo Helper Runtime"
+HOST_GZ_HELPER_READY=0
+if [[ -n "$PYTHON_FOR_CHECK" && -x "$PYTHON_FOR_CHECK" ]] \
+  && command -v gz >/dev/null 2>&1 \
+  && python_import_ok "$PYTHON_FOR_CHECK" "gz.transport13" \
+  && python_import_ok "$PYTHON_FOR_CHECK" "gz.msgs10" \
+  && python_gst_ok "$PYTHON_FOR_CHECK"; then
+  HOST_GZ_HELPER_READY=1
+fi
+
+EFFECTIVE_GZ_HELPER_BACKEND="${UCS_GZ_HELPER_BACKEND:-auto}"
+case "$EFFECTIVE_GZ_HELPER_BACKEND" in
+  auto)
+    if [[ "$HOST_GZ_HELPER_READY" -eq 1 ]]; then
+      EFFECTIVE_GZ_HELPER_BACKEND="host"
+    else
+      EFFECTIVE_GZ_HELPER_BACKEND="docker"
+    fi
+    ;;
+  host|docker)
+    ;;
+  *)
+    warn "unsupported UCS_GZ_HELPER_BACKEND=${UCS_GZ_HELPER_BACKEND}; expected auto, host, or docker"
+    EFFECTIVE_GZ_HELPER_BACKEND="docker"
+    ;;
+esac
+
+info "UCS_GZ_HELPER_BACKEND=${UCS_GZ_HELPER_BACKEND:-auto}; effective=${EFFECTIVE_GZ_HELPER_BACKEND}; image=${UCS_GZ_HELPER_IMAGE}"
+if [[ "$EFFECTIVE_GZ_HELPER_BACKEND" == "host" ]]; then
+  if [[ "$HOST_GZ_HELPER_READY" -eq 1 ]]; then
+    ok "host Gazebo helper Python runtime ready"
+  else
+    fail "UCS_GZ_HELPER_BACKEND=host but host Python/Gazebo/GStreamer helper dependencies are incomplete"
+    [[ -n "$PYTHON_FOR_CHECK" && -x "$PYTHON_FOR_CHECK" ]] && {
+      check_python_import "$PYTHON_FOR_CHECK" "gz.transport13" warn "host Gazebo Python transport"
+      check_python_import "$PYTHON_FOR_CHECK" "gz.msgs10" warn "host Gazebo Python messages"
+      if python_gst_ok "$PYTHON_FOR_CHECK"; then
+        ok "host Python GStreamer binding: gi.repository.Gst"
+      else
+        warn "host Python GStreamer binding not importable with ${PYTHON_FOR_CHECK}"
+      fi
+    }
+  fi
+else
+  if docker image inspect "$UCS_GZ_HELPER_IMAGE" >/dev/null 2>&1; then
+    ok "Gazebo helper Docker image available: ${UCS_GZ_HELPER_IMAGE}"
+    if docker_python_import_ok "$UCS_GZ_HELPER_IMAGE" "gz.transport13"; then
+      ok "helper image Gazebo Python transport: import gz.transport13"
+    else
+      fail "helper image cannot import gz.transport13: ${UCS_GZ_HELPER_IMAGE}"
+    fi
+    if docker_python_import_ok "$UCS_GZ_HELPER_IMAGE" "gz.msgs10"; then
+      ok "helper image Gazebo Python messages: import gz.msgs10"
+    else
+      fail "helper image cannot import gz.msgs10: ${UCS_GZ_HELPER_IMAGE}"
+    fi
+    if docker_python_gst_ok "$UCS_GZ_HELPER_IMAGE"; then
+      ok "helper image Python GStreamer binding: gi.repository.Gst"
+    else
+      fail "helper image cannot import gi.repository.Gst: ${UCS_GZ_HELPER_IMAGE}"
+    fi
+    if docker_cmd_ok "$UCS_GZ_HELPER_IMAGE" bash -lc "command -v gz"; then
+      ok "helper image Gazebo CLI: gz"
+    else
+      fail "helper image missing Gazebo CLI: ${UCS_GZ_HELPER_IMAGE}"
+    fi
+    if docker_cmd_ok "$UCS_GZ_HELPER_IMAGE" gst-inspect-1.0 x264enc; then
+      ok "helper image GStreamer software H.264 encoder: x264enc"
+    else
+      warn "helper image missing x264enc; install gstreamer1.0-plugins-ugly in ${UCS_GZ_HELPER_IMAGE}"
+    fi
+    helper_hw_encoder_found=0
+    if docker_helper_gpu_enabled; then
+      info "checking helper hardware encoders with Docker GPU passthrough"
+    else
+      info "checking helper hardware encoders without Docker GPU passthrough"
+    fi
+    for plugin in nvautogpuh264enc nvh264enc nvcudah264enc vah264enc vaapih264enc v4l2h264enc; do
+      if docker_cmd_ok_with_helper_gpu "$UCS_GZ_HELPER_IMAGE" gst-inspect-1.0 "$plugin"; then
+        ok "helper image GStreamer hardware H.264 encoder: ${plugin}"
+        helper_hw_encoder_found=1
+      fi
+    done
+    if [[ "$helper_hw_encoder_found" -eq 0 ]]; then
+      warn "helper image has no visible hardware H.264 encoder; VIDEO_ENCODER=hard will fail unless NVIDIA/VAAPI plugins are present at runtime"
+    fi
+  else
+    fail "Gazebo helper Docker image not available: ${UCS_GZ_HELPER_IMAGE}"
+  fi
 fi
 
 section "ns-3"

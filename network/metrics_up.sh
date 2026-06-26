@@ -35,6 +35,8 @@ VERBOSE=0
 DRY_RUN=0
 STOP_ONLY=0
 FOREGROUND=1
+GZ_HELPER_BACKEND="${UCS_GZ_HELPER_BACKEND:-auto}"
+GZ_HELPER_IMAGE="${UCS_GZ_HELPER_IMAGE:-$UCS_GAZEBO_IMAGE}"
 
 usage() {
   cat <<EOF
@@ -47,6 +49,10 @@ Usage: $(basename "$0") [--topology FILE] [--world NAME] [--verbose] [--dry-run]
 --fg              Foreground mode. (Current default behavior.)
 --bg              Start worker in detached background mode and exit.
 --stop            Stop existing worker for the resolved scenario and exit.
+
+Environment:
+  UCS_GZ_HELPER_BACKEND=auto|host|docker  Default: ${GZ_HELPER_BACKEND}
+  UCS_GZ_HELPER_IMAGE=IMAGE               Default: ${GZ_HELPER_IMAGE}
 EOF
 }
 
@@ -102,7 +108,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 need_cmd "$PYTHON_BIN"
-need_cmd gz
 need_cmd timeout
 need_cmd ip
 need_cmd awk
@@ -127,6 +132,70 @@ PY
 PIDFILE="/tmp/ucs_mesh_metrics_${SCENARIO_ID}.pid"
 LOGFILE="/tmp/ucs_mesh_metrics_${SCENARIO_ID}.log"
 RUNTIME_FILE="/tmp/ucs_mesh_metrics_${SCENARIO_ID}.runtime.json"
+SAFE_SCENARIO_ID="$(printf '%s' "$SCENARIO_ID" | tr -c 'A-Za-z0-9_.-' '_')"
+METRICS_CONTAINER="ucs-metrics-${SAFE_SCENARIO_ID}"
+
+python_has_gz_transport() {
+  "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+import gz.transport13
+import gz.msgs10
+PY
+}
+
+resolve_gz_helper_backend() {
+  case "$GZ_HELPER_BACKEND" in
+    host)
+      python_has_gz_transport || {
+        echo "[metrics_up][ERR] UCS_GZ_HELPER_BACKEND=host but $PYTHON_BIN cannot import gz.transport13/gz.msgs10" >&2
+        exit 1
+      }
+      need_cmd gz
+      printf '%s\n' host
+      ;;
+    docker)
+      need_cmd docker
+      docker image inspect "$GZ_HELPER_IMAGE" >/dev/null 2>&1 || {
+        echo "[metrics_up][ERR] helper image not found: $GZ_HELPER_IMAGE" >&2
+        exit 1
+      }
+      printf '%s\n' docker
+      ;;
+    auto)
+      if python_has_gz_transport && command -v gz >/dev/null 2>&1; then
+        printf '%s\n' host
+      else
+        need_cmd docker
+        docker image inspect "$GZ_HELPER_IMAGE" >/dev/null 2>&1 || {
+          echo "[metrics_up][ERR] host Gazebo Python binding unavailable and helper image not found: $GZ_HELPER_IMAGE" >&2
+          exit 1
+        }
+        printf '%s\n' docker
+      fi
+      ;;
+    *)
+      echo "[metrics_up][ERR] unsupported UCS_GZ_HELPER_BACKEND=$GZ_HELPER_BACKEND" >&2
+      exit 1
+      ;;
+  esac
+}
+
+HELPER_BACKEND="$(resolve_gz_helper_backend)"
+
+helper_gz_topic_once() {
+  case "$HELPER_BACKEND" in
+    host)
+      timeout 5s env GZ_PARTITION="$GZ_PARTITION" GZ_IP="$GZ_IP" gz topic -e -n 1 -t /clock >/dev/null 2>&1
+      ;;
+    docker)
+      timeout 8s docker run --rm \
+        --network host \
+        -e "GZ_PARTITION=${GZ_PARTITION}" \
+        -e "GZ_IP=${GZ_IP}" \
+        --entrypoint gz \
+        "$GZ_HELPER_IMAGE" topic -e -n 1 -t /clock >/dev/null 2>&1
+      ;;
+  esac
+}
 
 find_worker_pids() {
   "$PYTHON_BIN" - "$RUNTIME_FILE" <<'PY'
@@ -176,6 +245,13 @@ stop_pid() {
 
 stop_existing() {
   local pid=""
+  if [[ "$HELPER_BACKEND" == "docker" ]]; then
+    if docker ps -a --format '{{.Names}}' | grep -Fxq "$METRICS_CONTAINER"; then
+      echo "[metrics_up] removing helper container: $METRICS_CONTAINER"
+      docker rm -f "$METRICS_CONTAINER" >/dev/null 2>&1 || true
+    fi
+  fi
+
   if [[ -f "$PIDFILE" ]]; then
     pid="$(cat "$PIDFILE" 2>/dev/null || true)"
     stop_pid "pidfile worker" "$pid"
@@ -256,12 +332,13 @@ echo "[metrics_up] scenario   = $SCENARIO_ID"
 echo "[metrics_up] world      = $WORLD_NAME"
 echo "[metrics_up] GZ_PARTITION = $GZ_PARTITION"
 echo "[metrics_up] GZ_IP        = $GZ_IP"
+echo "[metrics_up] helper     = ${HELPER_BACKEND} (${GZ_HELPER_IMAGE})"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo "[metrics_up] dry-run: skipping Gazebo /clock readiness check"
 else
   echo "[metrics_up] checking Gazebo clock ..."
-  if ! timeout 5s env GZ_PARTITION="$GZ_PARTITION" GZ_IP="$GZ_IP" gz topic -e -n 1 -t /clock >/dev/null 2>&1; then
+  if ! helper_gz_topic_once; then
     echo "[metrics_up][ERR] cannot read /clock from Gazebo. Check world/GZ_PARTITION/GZ_IP." >&2
     exit 1
   fi
@@ -462,13 +539,37 @@ if [[ "$DRY_RUN" -eq 1 ]]; then
   exit 0
 fi
 
-WORKER_CMD=("$PYTHON_BIN" "$WORKER_PY" --runtime-file "$RUNTIME_FILE")
+WORKER_CMD=()
+case "$HELPER_BACKEND" in
+  host)
+    WORKER_CMD=("$PYTHON_BIN" "$WORKER_PY" --runtime-file "$RUNTIME_FILE")
+    ;;
+  docker)
+    WORKER_CMD=(
+      docker run --rm
+      --name "$METRICS_CONTAINER"
+      --network host
+      --user "$(id -u):$(id -g)"
+      -v "${MESH_DIR}:${MESH_DIR}:ro"
+      -v /tmp:/tmp
+      -v /dev/shm:/dev/shm
+      -e "GZ_PARTITION=${GZ_PARTITION}"
+      -e "GZ_IP=${GZ_IP}"
+      --entrypoint python3
+      "$GZ_HELPER_IMAGE"
+      "$WORKER_PY" --runtime-file "$RUNTIME_FILE"
+    )
+    ;;
+esac
 if [[ "$VERBOSE" -eq 1 ]]; then
   WORKER_CMD+=(--verbose)
 fi
 
 cleanup() {
   local rc=$?
+  if [[ "$HELPER_BACKEND" == "docker" ]]; then
+    docker rm -f "$METRICS_CONTAINER" >/dev/null 2>&1 || true
+  fi
   if [[ -f "$PIDFILE" ]]; then
     PID="$(cat "$PIDFILE" 2>/dev/null || true)"
     if [[ -n "${PID}" ]] && kill -0 "$PID" 2>/dev/null; then
