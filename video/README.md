@@ -45,6 +45,12 @@ sudo -v
 ./video/run_rtp_camera_flow.sh --uav uav04 --encoder x264
 ```
 
+子流默认 keyframe 间隔为 0.5s，主流默认 1.0s。调试切换时可临时覆盖：
+
+```bash
+./video/run_rtp_camera_flow.sh --uav uav04 --keyframe-interval-sec 0.5
+```
+
 Ubuntu 20 宿主机缺 Gazebo Python binding 或 GStreamer Python binding 时，使用 Docker helper：
 
 ```bash

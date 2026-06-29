@@ -176,6 +176,12 @@ class RtpCameraBridge:
         requested = self.args.encoder.strip().lower().replace("_", "-")
         return requested in {"auto", "hard", "hw", "hardware"}
 
+    def _keyint(self) -> int:
+        interval_sec = max(0.0, float(self.args.keyframe_interval_sec))
+        if interval_sec <= 0.0:
+            interval_sec = 1.0
+        return max(1, int(round(float(self.args.fps) * interval_sec)))
+
     def _launch_pipeline(self, pipeline_desc: str, encoder_label: str) -> Gst.Pipeline | None:
         if self.args.print_pipeline:
             print(f"[rtp-camera] encoder={encoder_label} pipeline={pipeline_desc}", flush=True)
@@ -267,13 +273,14 @@ class RtpCameraBridge:
         if self.args.bind_ip:
             bind_part = f" bind-address={self.args.bind_ip} bind-port=0"
 
-        keyint = max(1, int(round(self.args.fps)))
+        fps_int = max(1, int(round(self.args.fps)))
+        keyint = self._keyint()
         pipeline = None
         for encoder_label, raw_format, encoder_fragment in self._encoder_candidates(keyint):
             pipeline_desc = (
                 f"videotestsrc is-live=true pattern={self.args.pattern} "
                 f"! video/x-raw,format=I420,width={self.args.width},height={self.args.height},"
-                f"framerate={keyint}/1 "
+                f"framerate={fps_int}/1 "
                 "! queue leaky=downstream max-size-buffers=2 max-size-time=0 max-size-bytes=0 "
                 "! videoconvert "
                 f"! video/x-raw,format={raw_format} "
@@ -295,7 +302,7 @@ class RtpCameraBridge:
             f"{self.args.width}x{self.args.height}@{self.args.fps:g} "
             f"to {self.args.dst_ip}:{self.args.dst_port} "
             f"bind={self.args.bind_ip or 'auto'} bitrate_kbps={self.args.bitrate_kbps} "
-            f"encoder={self.encoder_label}",
+            f"encoder={self.encoder_label} keyint={keyint}",
             flush=True,
         )
         return True
@@ -318,7 +325,7 @@ class RtpCameraBridge:
         if self.args.bind_ip:
             bind_part = f" bind-address={self.args.bind_ip} bind-port=0"
 
-        keyint = max(1, int(round(self.args.fps)))
+        keyint = self._keyint()
         pipeline = None
         for encoder_label, raw_format, encoder_fragment in self._encoder_candidates(keyint):
             output_width = int(self.args.output_width or width)
@@ -367,7 +374,7 @@ class RtpCameraBridge:
         print(
             "[rtp-camera] streaming "
             f"{shape}@{self.args.fps:g} format={gst_format} "
-            f"to {self.args.dst_ip}:{self.args.dst_port} encoder={self.encoder_label}",
+            f"to {self.args.dst_ip}:{self.args.dst_port} encoder={self.encoder_label} keyint={keyint}",
             flush=True,
         )
         return True
@@ -471,6 +478,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bind-ip", default="", help="Source IP to bind, usually UAV experiment IP")
     parser.add_argument("--bitrate-kbps", type=int, default=4000, help="H.264 target bitrate")
     parser.add_argument("--fps", type=float, default=30.0, help="Input/output frame rate")
+    parser.add_argument(
+        "--keyframe-interval-sec",
+        type=float,
+        default=1.0,
+        help="Target keyframe interval in seconds; lower values reduce receiver switch latency. Default: 1.0",
+    )
     parser.add_argument(
         "--encoder",
         default="auto",

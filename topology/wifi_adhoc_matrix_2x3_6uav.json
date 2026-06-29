@@ -88,6 +88,7 @@
         "source_resolution": "1920x1080",
         "default_resolution": "960x540",
         "default_fps": 24,
+        "default_keyframe_interval_sec": 0.5,
         "default_bitrate_kbps": 1500,
         "bridge": {
           "runner": "video/run_rtp_camera_flow.sh",
@@ -112,6 +113,7 @@
         "source_resolution": "1920x1080",
         "default_resolution": "1920x1080",
         "default_fps": 30,
+        "default_keyframe_interval_sec": 1.0,
         "default_bitrate_kbps": 8000,
         "bridge": {
           "runner": "video/run_rtp_camera_flow.sh",

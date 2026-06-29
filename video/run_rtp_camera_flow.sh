@@ -17,6 +17,7 @@ DURATION_SEC="${DURATION_SEC:-0}"
 BITRATE_KBPS="${BITRATE_KBPS:-}"
 FPS="${FPS:-}"
 VIDEO_ENCODER="${VIDEO_ENCODER:-auto}"
+KEYFRAME_INTERVAL_SEC="${KEYFRAME_INTERVAL_SEC:-}"
 REPORT_SEC="${REPORT_SEC:-1}"
 DST_IP_OVERRIDE=""
 PORT_OVERRIDE=""
@@ -46,6 +47,9 @@ Options:
                         repeated. Default: video. Example: --flow video_main.
   --bitrate-kbps N      H.264 target bitrate. Default: selected flow default_bitrate_kbps.
   --fps N               Stream frame rate. Default: selected flow default_fps.
+  --keyframe-interval-sec N
+                        Target H.264 keyframe interval. Default: selected flow
+                        default_keyframe_interval_sec or 1.0.
   --encoder NAME        H.264 encoder: auto, hard, nvh264enc,
                         nvautogpuh264enc, nvcudah264enc, va, vaapi, v4l2,
                         openh264enc, x264. Default: ${VIDEO_ENCODER}.
@@ -115,6 +119,11 @@ while [[ $# -gt 0 ]]; do
     --fps)
       [[ $# -ge 2 ]] || die "--fps requires a value"
       FPS="$2"
+      shift 2
+      ;;
+    --keyframe-interval-sec)
+      [[ $# -ge 2 ]] || die "--keyframe-interval-sec requires a value"
+      KEYFRAME_INTERVAL_SEC="$2"
       shift 2
       ;;
     --encoder|--video-encoder)
@@ -218,13 +227,13 @@ cleanup_streams_file() {
   rm -f "$STREAMS_TSV"
 }
 
-"$PYTHON_BIN" - "$TOPOLOGY_FILE" "$SELECT_UAV" "$SELECT_IDX" "$ALL_STREAMS" "$DST_IP_OVERRIDE" "$PORT_OVERRIDE" "${BITRATE_KBPS:-}" "${FPS:-}" "${FLOW_KEYS[@]}" >"$STREAMS_TSV" <<'PY'
+"$PYTHON_BIN" - "$TOPOLOGY_FILE" "$SELECT_UAV" "$SELECT_IDX" "$ALL_STREAMS" "$DST_IP_OVERRIDE" "$PORT_OVERRIDE" "${BITRATE_KBPS:-}" "${FPS:-}" "${KEYFRAME_INTERVAL_SEC:-}" "${FLOW_KEYS[@]}" >"$STREAMS_TSV" <<'PY'
 import ipaddress
 import json
 import re
 import sys
 
-topology_file, select_uav, select_idx, all_streams, dst_override, port_override, bitrate_override, fps_override, *flow_keys = sys.argv[1:]
+topology_file, select_uav, select_idx, all_streams, dst_override, port_override, bitrate_override, fps_override, keyframe_interval_override, *flow_keys = sys.argv[1:]
 with open(topology_file, "r", encoding="utf-8") as f:
     topo = json.load(f)
 
@@ -306,6 +315,7 @@ for flow_key, flow in flow_cfgs:
     out_width, out_height = parse_resolution(flow.get("default_resolution"))
     bitrate = int(bitrate_override or flow.get("default_bitrate_kbps", 4000))
     fps = str(fps_override or flow.get("default_fps", 30))
+    keyframe_interval = str(keyframe_interval_override or flow.get("default_keyframe_interval_sec", 1.0))
     label = str(flow.get("label") or flow.get("role") or flow_key)
     for inst in selected:
         inst_id = str(inst.get("id", inst.get("name", "")))
@@ -325,6 +335,7 @@ for flow_key, flow in flow_cfgs:
             str(out_height),
             str(bitrate),
             fps,
+            keyframe_interval,
             inst_id,
             str(idx),
             container,
@@ -374,11 +385,11 @@ trap cleanup_all EXIT
 preflight_runtime() {
   local failed=0
   local docker_failed=0
-  local line scenario_id gz_partition flow_key flow_label out_width out_height bitrate fps uav_id idx container exp_if bind_ip dst_ip dst_port topic
+  local line scenario_id gz_partition flow_key flow_label out_width out_height bitrate fps keyframe_interval uav_id idx container exp_if bind_ip dst_ip dst_port topic
   local inspect_out running pid status
 
   for line in "${STREAM_LINES[@]}"; do
-    IFS=$'\t' read -r scenario_id gz_partition flow_key flow_label out_width out_height bitrate fps uav_id idx container exp_if bind_ip dst_ip dst_port topic <<<"$line"
+    IFS=$'\t' read -r scenario_id gz_partition flow_key flow_label out_width out_height bitrate fps keyframe_interval uav_id idx container exp_if bind_ip dst_ip dst_port topic <<<"$line"
     if ! inspect_out="$(docker inspect -f '{{.State.Running}}	{{.State.Pid}}	{{.State.Status}}' "$container" 2>&1)"; then
       echo "[rtp-flow][ERR] docker inspect failed for ${container}: ${inspect_out}" >&2
       docker_failed=1
@@ -416,15 +427,15 @@ docker_gpu_args() {
 
 start_stream() {
   local line="$1"
-  local scenario_id gz_partition flow_key flow_label out_width out_height bitrate fps uav_id idx container exp_if bind_ip dst_ip dst_port topic
-  IFS=$'\t' read -r scenario_id gz_partition flow_key flow_label out_width out_height bitrate fps uav_id idx container exp_if bind_ip dst_ip dst_port topic <<<"$line"
+  local scenario_id gz_partition flow_key flow_label out_width out_height bitrate fps keyframe_interval uav_id idx container exp_if bind_ip dst_ip dst_port topic
+  IFS=$'\t' read -r scenario_id gz_partition flow_key flow_label out_width out_height bitrate fps keyframe_interval uav_id idx container exp_if bind_ip dst_ip dst_port topic <<<"$line"
 
   local viewer_cmd
   viewer_cmd="gst-launch-1.0 udpsrc address=${dst_ip} port=${dst_port} caps=\"${RTP_CAPS}\" ! rtph264depay ! avdec_h264 ! videoconvert ! autovideosink sync=false"
 
   echo "[rtp-flow] ${uav_id}/${flow_label}: ${bind_ip} -> ${dst_ip}:${dst_port}"
   echo "[rtp-flow] ${uav_id}/${flow_label}: topic=${topic}"
-  echo "[rtp-flow] ${uav_id}/${flow_label}: output=${out_width}x${out_height} bitrate_kbps=${bitrate} fps=${fps}"
+  echo "[rtp-flow] ${uav_id}/${flow_label}: output=${out_width}x${out_height} bitrate_kbps=${bitrate} fps=${fps} keyframe_interval_sec=${keyframe_interval}"
   echo "[rtp-flow] ${uav_id}/${flow_label}: container=${container} exp_if=${exp_if}"
   echo "[rtp-flow] ${uav_id}/${flow_label}: viewer=${viewer_cmd}"
 
@@ -507,6 +518,7 @@ start_stream() {
     --bind-ip "$bind_ip"
     --bitrate-kbps "$bitrate"
     --fps "$fps"
+    --keyframe-interval-sec "$keyframe_interval"
     --output-width "$out_width"
     --output-height "$out_height"
     --encoder "$VIDEO_ENCODER"
