@@ -779,6 +779,20 @@ class ControlCore:
             label="in_air",
         ):
             return False
+        target_altitude = min(
+            self.args.takeoff_altitude_m,
+            max(
+                self.args.takeoff_altitude_min_confirm_m,
+                self.args.takeoff_altitude_m * self.args.takeoff_altitude_confirm_ratio,
+            ),
+        )
+        if not await self.wait_for_state(
+            lambda: (self.state.actual_relative_altitude_m or 0.0) >= target_altitude,
+            timeout_sec=self.args.takeoff_wait_sec,
+            event="takeoff_altitude_wait_timeout",
+            label=f"relative_altitude >= {target_altitude:.2f}m",
+        ):
+            return False
         await self.log("[action] takeoff confirmed", event="takeoff_confirmed")
         return True
 
@@ -959,6 +973,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-yaw-rate-deg-s", type=float, default=45.0)
     parser.add_argument("--yaw-hold-deadband-deg", type=float, default=0.5)
     parser.add_argument("--takeoff-altitude-m", type=float, default=3.0)
+    parser.add_argument("--takeoff-altitude-confirm-ratio", type=float, default=0.75)
+    parser.add_argument("--takeoff-altitude-min-confirm-m", type=float, default=1.0)
     parser.add_argument("--arm-wait-sec", type=float, default=8.0)
     parser.add_argument("--takeoff-wait-sec", type=float, default=10.0)
     parser.add_argument("--offboard-prime-sec", type=float, default=1.2)
