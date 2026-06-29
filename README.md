@@ -186,7 +186,7 @@ source ./fleet/env_defaults.sh
 Gazebo camera topic -> rtp_camera_bridge.py -> RTP/H.264 UDP -> GS
 源 IP:       UAV 实验网 IP
 目的 IP:     10.10.0.254
-子流:        5600 + UAV idx, 960x540, 30fps, 1500kbps
+子流:        5600 + UAV idx, 960x540, 24fps, 1500kbps
 主流:        5700 + UAV idx, 1920x1080, 30fps, 8000kbps
 ```
 

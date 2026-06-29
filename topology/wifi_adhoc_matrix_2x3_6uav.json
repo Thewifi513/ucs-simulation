@@ -87,7 +87,7 @@
         "source": "Gazebo x500_gimbal camera topic, downscaled for dashboard preview",
         "source_resolution": "1920x1080",
         "default_resolution": "960x540",
-        "default_fps": 30,
+        "default_fps": 24,
         "default_bitrate_kbps": 1500,
         "bridge": {
           "runner": "video/run_rtp_camera_flow.sh",

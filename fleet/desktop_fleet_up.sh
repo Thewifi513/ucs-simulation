@@ -42,7 +42,7 @@ fi
   --with-video \
   --gui \
   --video-bitrate-kbps "${VIDEO_BITRATE_KBPS:-4000}" \
-  --video-fps "${VIDEO_FPS:-30}" \
+  --video-fps "${VIDEO_FPS:-24}" \
   --video-encoder "${VIDEO_ENCODER:-auto}" \
   "${control_args[@]}" \
   --with-dashboard \
