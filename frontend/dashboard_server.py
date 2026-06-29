@@ -24,6 +24,44 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 
+try:
+    BooleanOptionalAction = argparse.BooleanOptionalAction
+except AttributeError:  # Python 3.8 compatibility on Ubuntu 20.
+    class BooleanOptionalAction(argparse.Action):
+        def __init__(
+            self,
+            option_strings: Iterable[str],
+            dest: str,
+            default: Any = None,
+            required: bool = False,
+            help: Optional[str] = None,
+            metavar: Optional[str] = None,
+        ) -> None:
+            expanded: List[str] = []
+            for option_string in option_strings:
+                expanded.append(option_string)
+                if option_string.startswith("--"):
+                    expanded.append("--no-" + option_string[2:])
+            super().__init__(
+                option_strings=expanded,
+                dest=dest,
+                nargs=0,
+                default=default,
+                required=required,
+                help=help,
+                metavar=metavar,
+            )
+
+        def __call__(
+            self,
+            parser: argparse.ArgumentParser,
+            namespace: argparse.Namespace,
+            values: Any,
+            option_string: Optional[str] = None,
+        ) -> None:
+            setattr(namespace, self.dest, not (option_string or "").startswith("--no-"))
+
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 MESH_DIR = SCRIPT_DIR.parent
 DEFAULT_TOPOLOGY = MESH_DIR / "topology" / "wifi_adhoc_matrix_2x3_6uav.json"
@@ -40,6 +78,12 @@ LINK_SHM_MAX_AGE_SEC = 5.0
 DASHBOARD_VIDEO_IDLE_SEC = 30.0
 DASHBOARD_VIDEO_SENDER_IDLE_SEC = 45.0
 RTP_CAMERA_FLOW_SH = MESH_DIR / "video" / "run_rtp_camera_flow.sh"
+
+
+def current_uid() -> int:
+    if hasattr(os, "getuid"):
+        return int(os.getuid())
+    return int(os.getpid())
 
 try:
     import gi  # type: ignore
@@ -1901,7 +1945,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--video-drop-on-latency",
-        action=argparse.BooleanOptionalAction,
+        action=BooleanOptionalAction,
         default=parse_bool(os.environ.get("DASHBOARD_VIDEO_DROP_ON_LATENCY"), True),
         help="Drop RTP packets when the jitter buffer exceeds latency. Default: true",
     )
@@ -1922,13 +1966,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--video-on-demand",
-        action=argparse.BooleanOptionalAction,
+        action=BooleanOptionalAction,
         default=parse_bool(os.environ.get("DASHBOARD_VIDEO_ON_DEMAND"), False),
         help="Start RTP camera senders only when /video/<uav>.mjpg is requested. Default: false",
     )
     parser.add_argument(
         "--video-prewarm-substreams",
-        action=argparse.BooleanOptionalAction,
+        action=BooleanOptionalAction,
         default=parse_bool(os.environ.get("DASHBOARD_VIDEO_PREWARM_SUBSTREAMS"), False),
         help="When on-demand mode is enabled, start all preview substream senders in the background. Default: false",
     )
@@ -1945,7 +1989,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--video-sender-run-dir",
-        default=os.environ.get("DASHBOARD_VIDEO_SENDER_RUN_DIR", f"/tmp/ucs-mesh-{os.getuid()}/dashboard-rtp"),
+        default=os.environ.get("DASHBOARD_VIDEO_SENDER_RUN_DIR", f"/tmp/ucs-mesh-{current_uid()}/dashboard-rtp"),
         help="Directory for on-demand RTP sender logs and pid files.",
     )
     return parser
