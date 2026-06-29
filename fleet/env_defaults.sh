@@ -138,7 +138,7 @@ ucs_docker_gpu_args() {
 }
 
 ucs_cpu_count() {
-  nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1\n'
+  nproc --all 2>/dev/null || getconf _NPROCESSORS_CONF 2>/dev/null || nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1\n'
 }
 
 ucs_cpu_affinity_enabled() {
