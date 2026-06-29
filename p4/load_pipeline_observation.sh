@@ -17,6 +17,7 @@ TARGET_FILTER=""
 INCLUDE_GS=0
 INSTALL_CLUSTER_HEAD_ROUTES=0
 ROUTING_MODE="${UCS_MESH_ROUTING_MODE:-}"
+ROUTING_METRICS_MAX_AGE_SEC="${UCS_MESH_ROUTING_METRICS_MAX_AGE_SEC:-15}"
 CLUSTER_HEADS="${UCS_MESH_CLUSTER_HEADS:-}"
 if [[ -n "${UCS_MESH_GS_APP_IF+x}" ]]; then
   GS_APP_IF="$UCS_MESH_GS_APP_IF"
@@ -50,6 +51,8 @@ Options:
   --gs-grpc-addr ADDR   P4Runtime address for the GS edge. Default: 127.0.0.1:9560
   --routing-entries     Install BMv2 route table entries from programmable_net.routing.mode
   --routing-mode MODE   Route entry mode: cluster_heads or adaptive_prior. Default: topology routing.mode
+  --routing-metrics-max-age-sec SEC
+                        Max age for live routing metrics. Default: 15
   --cluster-head-routes Backward-compatible alias for --routing-entries
   --cluster-heads MAP   Cluster head map, e.g. 1:uav01,2:uav04
   --p4runtime-image IMG P4Runtime shell image. Default: ucs-p4runtime-sh:20260625
@@ -134,6 +137,11 @@ while [[ $# -gt 0 ]]; do
     --routing-mode)
       ROUTING_MODE="${2:-}"
       [[ -n "$ROUTING_MODE" ]] || die "--routing-mode requires a mode"
+      shift 2
+      ;;
+    --routing-metrics-max-age-sec)
+      ROUTING_METRICS_MAX_AGE_SEC="${2:-}"
+      [[ "$ROUTING_METRICS_MAX_AGE_SEC" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "--routing-metrics-max-age-sec requires a number"
       shift 2
       ;;
     --cluster-heads)
@@ -422,6 +430,7 @@ load_one() {
       --target-id "$uav_id" \
       --output "$entries_abs" \
       --routing-mode "$ROUTING_MODE" \
+      --metrics-max-age-sec "$ROUTING_METRICS_MAX_AGE_SEC" \
       --cluster-heads "$CLUSTER_HEADS" \
       --gs-app-if "$GS_APP_IF"
     entries_rel="$(repo_rel_path "$entries_abs")"
@@ -466,7 +475,7 @@ log "pipeline artifacts:"
 log "  json=${BMV2_JSON_ABS}"
 log "  p4info=${P4INFO_ABS}"
 if [[ "$INSTALL_CLUSTER_HEAD_ROUTES" -eq 1 ]]; then
-  log "route entries mode=${ROUTING_MODE:-topology} gs-app-if=${GS_APP_IF}"
+  log "route entries mode=${ROUTING_MODE:-topology} gs-app-if=${GS_APP_IF} metrics_max_age=${ROUTING_METRICS_MAX_AGE_SEC}s"
 fi
 log "loading via observation network using ${P4RUNTIME_IMAGE}"
 

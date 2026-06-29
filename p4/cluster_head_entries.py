@@ -12,8 +12,12 @@ import heapq
 import ipaddress
 import json
 import math
+import mmap
 import os
+import re
+import struct
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +29,12 @@ PARAM_DST_MAC = "dst_mac"
 PARAM_SRC_MAC = "src_mac"
 PARAM_PORT = "port"
 DEFAULT_AIR_PORT = 2
+LINK_SHM_MAGIC = b"UCSLNK01"
+LINK_SHM_VERSION = 1
+LINK_SHM_HEADER = struct.Struct("<8sIIQddII16s")
+LINK_SHM_MAX_AGE_SEC = 5.0
+LOG_LINE_RE = re.compile(r"\[(?:pair-link|link)\]\s+(.*)")
+FIELD_RE = re.compile(r"(\w+)=([^\s]+)")
 
 CLUSTER_HEAD_MODES = {"cluster_heads", "cluster_head_routes"}
 ADAPTIVE_PRIOR_MODES = {"adaptive_prior", "adaptive_prior_loss", "prior_adaptive", "adaptive"}
@@ -49,6 +59,12 @@ LOSS_KEYS = (
 )
 DELAY_KEYS = ("delay_ms", "latency_ms", "queue_delay_ms", "prior_delay_ms")
 JITTER_KEYS = ("jitter_ms", "delay_jitter_ms", "prior_jitter_ms")
+DISTANCE_KEYS = ("distance_m", "distance", "prior_distance_m")
+OBSTRUCTION_KEYS = (
+    "obstruction_loss_db",
+    "obstruction_raw_loss_db",
+    "prior_obstruction_loss_db",
+)
 
 
 def cidr_ip(cidr: str) -> str:
@@ -128,11 +144,16 @@ def finite_float(value: Any) -> float | None:
 
 def nested_dicts(source: dict[str, Any]) -> list[dict[str, Any]]:
     result = [source]
-    for key in ("routing", "prior", "impairment", "link_state"):
+    for key in ("routing", "prior", "impairment", "metrics", "link_state"):
         child = source.get(key)
         if isinstance(child, dict):
             result.append(child)
     return result
+
+
+def sanitize_for_path(value: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", value)
+    return safe or "default"
 
 
 def first_number(source: dict[str, Any], keys: tuple[str, ...]) -> float | None:
@@ -164,6 +185,7 @@ def endpoint_positions(
     topo: dict[str, Any],
     instances: list[dict[str, Any]],
     gs_id: str,
+    metrics_max_age_sec: float,
 ) -> dict[str, dict[str, float]]:
     globals_ = topo.get("globals", {})
     positions: dict[str, dict[str, float]] = {}
@@ -186,7 +208,137 @@ def endpoint_positions(
                 "y": ui_pose["y"] / 10.0,
                 "z": ui_pose["z"],
             }
+
+    latest_mtime: dict[str, float] = {}
+    for raw_link in list(topo.get("links", [])) + list(topo.get("mesh_links", [])):
+        if not isinstance(raw_link, dict):
+            continue
+        metric = read_pair_metrics(raw_link, metrics_max_age_sec)
+        if not metric:
+            continue
+        mtime = float(metric.get("mtime", 0.0))
+        src = str(raw_link.get("src", ""))
+        dst = str(raw_link.get("dst", ""))
+        for endpoint, key in ((src, "src_pos"), (dst, "dst_pos")):
+            pos = metric.get(key)
+            if isinstance(pos, dict) and mtime >= latest_mtime.get(endpoint, -1.0):
+                positions[endpoint] = pos
+                latest_mtime[endpoint] = mtime
     return positions
+
+
+def read_pair_metrics(raw_link: dict[str, Any], max_age_sec: float) -> dict[str, Any]:
+    path_value = str(raw_link.get("metrics_file", ""))
+    if not path_value:
+        return {}
+    path = Path(path_value)
+    try:
+        stat = path.stat()
+        if max_age_sec > 0.0 and time.time() - stat.st_mtime > max_age_sec:
+            return {}
+        parts = path.read_text(encoding="utf-8").strip().split()
+    except OSError:
+        return {}
+    if len(parts) < 8:
+        return {}
+    values = [finite_float(part) for part in parts[:10]]
+    if any(value is None for value in values[:8]):
+        return {}
+    return {
+        "mtime": stat.st_mtime,
+        "age_sec": max(0.0, time.time() - stat.st_mtime),
+        "sim_time": values[0],
+        "distance_m": values[1],
+        "src_pos": {"x": values[2], "y": values[3], "z": values[4]},
+        "dst_pos": {"x": values[5], "y": values[6], "z": values[7]},
+        "src_valid": values[8] if len(values) > 8 else None,
+        "dst_valid": values[9] if len(values) > 9 else None,
+    }
+
+
+def parse_link_snapshot_text(text: str) -> dict[str, dict[str, str]]:
+    last_by_id: dict[str, dict[str, str]] = {}
+    for line in text.splitlines():
+        match = LOG_LINE_RE.search(line)
+        if not match:
+            continue
+        fields = dict(FIELD_RE.findall(match.group(1)))
+        if fields.get("id"):
+            last_by_id[str(fields["id"])] = fields
+    return last_by_id
+
+
+def read_link_state_shm(scenario_id: str, max_age_sec: float) -> dict[str, dict[str, str]]:
+    path = Path("/dev/shm") / f"ucs_mesh_link_state_{sanitize_for_path(scenario_id)}.bin"
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("rb") as handle:
+            size = os.fstat(handle.fileno()).st_size
+            if size < LINK_SHM_HEADER.size:
+                return {}
+            with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+                for _ in range(3):
+                    first = LINK_SHM_HEADER.unpack(mapped[:LINK_SHM_HEADER.size])
+                    (
+                        magic,
+                        version,
+                        payload_bytes,
+                        seq,
+                        _sim_time,
+                        wall_time,
+                        used_bytes,
+                        _line_count,
+                        _reserved,
+                    ) = first
+                    if (
+                        magic != LINK_SHM_MAGIC
+                        or version != LINK_SHM_VERSION
+                        or seq & 1
+                        or payload_bytes <= 0
+                        or used_bytes > payload_bytes
+                        or LINK_SHM_HEADER.size + used_bytes > size
+                    ):
+                        return {}
+                    if math.isfinite(wall_time) and wall_time > 0.0 and max_age_sec > 0.0:
+                        if time.time() - wall_time > max_age_sec:
+                            return {}
+                    payload = bytes(mapped[LINK_SHM_HEADER.size:LINK_SHM_HEADER.size + used_bytes])
+                    second = LINK_SHM_HEADER.unpack(mapped[:LINK_SHM_HEADER.size])
+                    if first == second and not (second[3] & 1):
+                        return parse_link_snapshot_text(payload.decode("utf-8", errors="replace"))
+                    time.sleep(0.001)
+    except OSError:
+        return {}
+    return {}
+
+
+def read_recent_link_log(scenario_id: str, max_bytes: int = 4 * 1024 * 1024) -> dict[str, dict[str, str]]:
+    for path in (
+        Path(f"/tmp/ucs_mesh_ns3_{scenario_id}.launcher.log"),
+        Path(f"/tmp/ucs_mesh_ns3_{scenario_id}.log"),
+    ):
+        if not path.is_file():
+            continue
+        try:
+            with path.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                handle.seek(max(0, size - max_bytes), os.SEEK_SET)
+                return parse_link_snapshot_text(handle.read().decode("utf-8", errors="replace"))
+        except OSError:
+            continue
+    return {}
+
+
+def runtime_link_state(topo: dict[str, Any], max_age_sec: float) -> dict[str, dict[str, str]]:
+    scenario_id = str(topo.get("scenario_id", ""))
+    if not scenario_id:
+        return {}
+    state = read_link_state_shm(scenario_id, max_age_sec)
+    if state:
+        return state
+    return read_recent_link_log(scenario_id)
 
 
 def distance_m(a: dict[str, float], b: dict[str, float]) -> float:
@@ -351,12 +503,15 @@ def estimate_link_cost(
     src_pos = positions.get(src)
     dst_pos = positions.get(dst)
 
-    dist = 0.0
-    obstruction_loss = 0.0
+    dist = first_number(raw_link, DISTANCE_KEYS) or 0.0
+    obstruction_loss_value = first_number(raw_link, OBSTRUCTION_KEYS)
+    obstruction_loss = obstruction_loss_value if obstruction_loss_value is not None else 0.0
     margin_db: float | None = None
     if src_pos and dst_pos:
-        dist = distance_m(src_pos, dst_pos)
-        obstruction_loss = estimate_obstruction_loss_db(src_pos, dst_pos, link_sim)
+        if dist <= 0.0:
+            dist = distance_m(src_pos, dst_pos)
+        if obstruction_loss_value is None:
+            obstruction_loss = estimate_obstruction_loss_db(src_pos, dst_pos, link_sim)
         path_loss = estimate_path_loss_db(dist, link_sim)
         tx_power = first_number(raw_link, ("tx_power_dbm", "prior_tx_power_dbm"))
         if tx_power is None:
@@ -397,6 +552,8 @@ def estimate_link_cost(
         "loss": loss,
         "delay_ms": delay_ms,
         "jitter_ms": jitter_ms,
+        "metrics_age_sec": first_number(raw_link, ("age_sec",)),
+        "runtime_source": "link_state" if raw_link.get("link_state") else ("metrics" if raw_link.get("metrics") else "topology"),
     }
 
 
@@ -410,12 +567,14 @@ def build_adaptive_graph(
     instances: list[dict[str, Any]],
     gs_id: str,
     endpoint_cluster: dict[str, int],
+    metrics_max_age_sec: float,
 ) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]]]:
     globals_ = topo.get("globals", {})
     link_sim = globals_.get("link_simulation", {})
     if not isinstance(link_sim, dict):
         link_sim = {}
-    positions = endpoint_positions(topo, instances, gs_id)
+    positions = endpoint_positions(topo, instances, gs_id, metrics_max_age_sec)
+    link_state = runtime_link_state(topo, metrics_max_age_sec)
     graph: dict[str, dict[str, float]] = {}
     link_costs: list[dict[str, Any]] = []
     uav_ids = {str(inst.get("id")) for inst in instances if inst.get("type") == "uav"}
@@ -440,11 +599,19 @@ def build_adaptive_graph(
         if not allowed:
             continue
 
-        cost, details = estimate_link_cost(raw_link, positions, link_sim)
+        link_id = str(raw_link.get("id", f"{src}-{dst}"))
+        augmented_link = dict(raw_link)
+        metric = read_pair_metrics(raw_link, metrics_max_age_sec)
+        if metric:
+            augmented_link["metrics"] = metric
+        if link_id in link_state:
+            augmented_link["link_state"] = link_state[link_id]
+
+        cost, details = estimate_link_cost(augmented_link, positions, link_sim)
         add_edge(graph, src, dst, cost)
         link_costs.append(
             {
-                "id": raw_link.get("id", f"{src}-{dst}"),
+                "id": link_id,
                 "src": src,
                 "dst": dst,
                 **details,
@@ -633,11 +800,18 @@ def adaptive_prior_route_entries_from_topology(
     endpoint_ip: dict[str, str],
     endpoint_mac: dict[str, str],
     air_port: int,
+    metrics_max_age_sec: float,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, list[str]]], list[dict[str, Any]]]:
     if target != gs_id and target not in by_id:
         raise SystemExit(f"[cluster-entries][ERR] unknown target id: {target}")
 
-    graph, link_costs = build_adaptive_graph(topo, instances, gs_id, endpoint_cluster)
+    graph, link_costs = build_adaptive_graph(
+        topo,
+        instances,
+        gs_id,
+        endpoint_cluster,
+        metrics_max_age_sec,
+    )
     if target not in graph:
         raise SystemExit(f"[cluster-entries][ERR] no adaptive graph edges for target: {target}")
 
@@ -667,6 +841,11 @@ def main() -> int:
     parser.add_argument("--gs-id", default="")
     parser.add_argument("--gs-app-if", default=os.environ.get("UCS_MESH_GS_APP_IF", "gs0"))
     parser.add_argument("--uav-exp-if", default="eth1")
+    parser.add_argument(
+        "--metrics-max-age-sec",
+        type=float,
+        default=float(os.environ.get("UCS_MESH_ROUTING_METRICS_MAX_AGE_SEC", "15")),
+    )
     args = parser.parse_args()
 
     with open(args.topology, "r", encoding="utf-8") as f:
@@ -733,6 +912,7 @@ def main() -> int:
             endpoint_ip,
             endpoint_mac,
             air_port,
+            args.metrics_max_age_sec,
         )
 
     payload = {
@@ -742,6 +922,7 @@ def main() -> int:
         "air_port": air_port,
         "routes": routes,
         "link_costs": link_costs,
+        "metrics_max_age_sec": args.metrics_max_age_sec,
         "entries": entries,
     }
 

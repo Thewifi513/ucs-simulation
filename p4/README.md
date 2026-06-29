@@ -57,6 +57,14 @@ build/ucs_edge_cluster_route.p4info.txt   已编译 P4Info
   --topology ./topology/wifi_adhoc_matrix_2x3_6uav.json
 ```
 
+跟随运行时链路状态自动重算：
+
+```bash
+./p4/adaptive_route_monitor.sh \
+  --topology ./topology/wifi_adhoc_matrix_2x3_6uav.json \
+  --interval-sec 5
+```
+
 ## 运行产物
 
 ```text
@@ -72,6 +80,6 @@ p4/build/p4runtime_entries/*.json   live 加载时临时生成，可删除
 - 新 P4 表或 action 应先扩展 `ucs_edge_cluster_route.p4`，再扩展 `cluster_head_entries.py` 的表项生成逻辑。
 - `load_pipeline_observation.sh --target` 是单设备调试入口。
 - `--cluster-heads 1:uav01,2:uav04` 是当前 cluster-head 策略的外部控制接口。
-- `programmable_net.routing.mode=adaptive_prior` 会按 GS-UAV 边和同 cluster UAV-UAV 边计算最短代价下一跳；边权优先读取 `routing_cost`、`prior_cost`、`prior_loss`、`delay_ms` 等显式先验字段，缺省时用位置距离和障碍物损伤估算。
+- `programmable_net.routing.mode=adaptive_prior` 会按 GS-UAV 边和同 cluster UAV-UAV 边计算最短代价下一跳；边权优先读取运行时 `/dev/shm` 链路状态和 metrics 位置，再读取 `routing_cost`、`prior_cost`、`prior_loss`、`delay_ms` 等显式先验字段，缺省时用拓扑位置距离和障碍物损伤估算。
 - `--compile` 可用于开发机自动重编译；服务器建议保持 `--no-compile` 和固定产物。
 - 新 BMv2 目标应先在拓扑 `programmable_net` 中声明 device id、grpc 地址和端口映射。

@@ -9,6 +9,8 @@ DEFAULT_TOPOLOGY="${MESH_DIR}/topology/wifi_adhoc_matrix_2x3_6uav.json"
 
 TOPOLOGY_FILE="${TOPOLOGY_FILE:-$DEFAULT_TOPOLOGY}"
 ROUTING_MODE="${UCS_MESH_ROUTING_MODE:-adaptive_prior}"
+ROUTING_METRICS_MAX_AGE_SEC="${UCS_MESH_ROUTING_METRICS_MAX_AGE_SEC:-15}"
+TARGET_FILTER=""
 DRY_RUN=0
 VERBOSE=0
 
@@ -19,7 +21,10 @@ Usage:
 
 Options:
   --topology FILE       Topology JSON file
+  --target ID           Load only one UAV id or gs
   --routing-mode MODE   Route entry mode. Default: adaptive_prior
+  --routing-metrics-max-age-sec SEC
+                        Max age for live routing metrics. Default: 15
   --dry-run             Print resolved P4Runtime targets without loading
   --verbose             Print more details
   -h, --help            Show this help
@@ -39,6 +44,16 @@ while [[ $# -gt 0 ]]; do
     --routing-mode)
       ROUTING_MODE="${2:-}"
       [[ -n "$ROUTING_MODE" ]] || { echo "[p4-adaptive][ERR] --routing-mode requires a mode" >&2; exit 1; }
+      shift 2
+      ;;
+    --routing-metrics-max-age-sec)
+      ROUTING_METRICS_MAX_AGE_SEC="${2:-}"
+      [[ "$ROUTING_METRICS_MAX_AGE_SEC" =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "[p4-adaptive][ERR] --routing-metrics-max-age-sec requires a number" >&2; exit 1; }
+      shift 2
+      ;;
+    --target)
+      TARGET_FILTER="${2:-}"
+      [[ -n "$TARGET_FILTER" ]] || { echo "[p4-adaptive][ERR] --target requires an id" >&2; exit 1; }
       shift 2
       ;;
     --verbose)
@@ -69,7 +84,12 @@ args=(
   --include-gs
   --routing-entries
   --routing-mode "$ROUTING_MODE"
+  --routing-metrics-max-age-sec "$ROUTING_METRICS_MAX_AGE_SEC"
 )
+
+if [[ -n "$TARGET_FILTER" ]]; then
+  args+=(--target "$TARGET_FILTER")
+fi
 
 if [[ "$VERBOSE" -eq 1 ]]; then
   args+=(--verbose)
