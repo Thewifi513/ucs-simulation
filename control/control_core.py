@@ -701,6 +701,7 @@ class ControlCore:
                     return
                 self.state.target_yaw_deg = self.state.yaw_deg
                 await self.apply_offboard_loss_policy()
+                await self.prime_offboard_setpoints()
                 if not await self.arm_and_confirm():
                     return
                 try:
