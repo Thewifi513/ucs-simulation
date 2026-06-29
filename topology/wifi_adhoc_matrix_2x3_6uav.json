@@ -134,26 +134,26 @@
         "command/gimbal_yaw"
       ]
     },
-      "link_simulation": {
-        "enabled": true,
-        "model": "large_small_fading_v1",
-        "link_error_model": "receiver_sensitivity_bler_v1",
-        "rx_sensitivity_dbm": -92.0,
-        "rx_loss_full_dbm": -96.0,
-        "noise_floor_dbm": -96.0,
-        "packet_error_bytes": 1200.0,
-        "packet_size_scaling_enabled": true,
-        "packet_error_rate_cap": 1.0,
-        "packet_error_smoothing_tau_s": 0.15,
-        "mac_medium_access": "pairwise_serial_arq_v1",
-        "mac_data_rate": "20Mbps",
-        "mac_queue_limit_packets": 512,
-        "mac_retry_enabled": true,
-        "mac_retry_max_retries": 7,
-        "mac_retry_slot_time": "1ms",
-        "mac_retry_jitter_max": "2ms",
-        "mac_retry_broadcast": false,
-        "frequency_hz": 5180000000.0,
+    "link_simulation": {
+      "enabled": true,
+      "model": "large_small_fading_v1",
+      "link_error_model": "receiver_sensitivity_bler_v1",
+      "rx_sensitivity_dbm": -92.0,
+      "rx_loss_full_dbm": -96.0,
+      "noise_floor_dbm": -96.0,
+      "packet_error_bytes": 1200.0,
+      "packet_size_scaling_enabled": true,
+      "packet_error_rate_cap": 1.0,
+      "packet_error_smoothing_tau_s": 0.15,
+      "mac_medium_access": "pairwise_serial_arq_v1",
+      "mac_data_rate": "20Mbps",
+      "mac_queue_limit_packets": 512,
+      "mac_retry_enabled": true,
+      "mac_retry_max_retries": 7,
+      "mac_retry_slot_time": "1ms",
+      "mac_retry_jitter_max": "2ms",
+      "mac_retry_broadcast": false,
+      "frequency_hz": 5180000000.0,
       "large_scale": {
         "path_loss": {
           "model": "ns3::LogDistancePropagationLossModel",
@@ -598,14 +598,18 @@
       "src": "gs",
       "dst": "uav01",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav01.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav01.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "gs-uav02",
       "src": "gs",
       "dst": "uav02",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav02.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_gs_uav02.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "gs-uav03",
@@ -675,63 +679,81 @@
       "src": "uav01",
       "dst": "uav02",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav02.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav02.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "uav01-uav03",
       "src": "uav01",
       "dst": "uav03",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav03.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav03.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "uav01-uav04",
       "src": "uav01",
       "dst": "uav04",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav04.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav04.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "uav01-uav05",
       "src": "uav01",
       "dst": "uav05",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav05.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav05.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "uav01-uav06",
       "src": "uav01",
       "dst": "uav06",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav06.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav01_uav06.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "uav02-uav03",
       "src": "uav02",
       "dst": "uav03",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav03.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav03.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "uav02-uav04",
       "src": "uav02",
       "dst": "uav04",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav04.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav04.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "uav02-uav05",
       "src": "uav02",
       "dst": "uav05",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav05.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav05.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "uav02-uav06",
       "src": "uav02",
       "dst": "uav06",
       "enabled": true,
-      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav06.txt"
+      "metrics_file": "/tmp/ucs_mesh_metrics_uav02_uav06.txt",
+      "tx_power_dbm": 27.0,
+      "data_rate": "80Mbps"
     },
     {
       "id": "uav03-uav04",

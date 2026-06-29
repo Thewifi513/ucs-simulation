@@ -293,7 +293,9 @@ struct LinkSpec
 
   std::string metricsFile;
   std::string dataRate;
+  bool dataRateExplicit{false};
   std::string baseDelay;
+  std::optional<double> txPowerDbm;
 
   double lossMin{0.0};
   double lossMax{0.30};
@@ -1096,6 +1098,7 @@ static Building::ExtWallsType_t ParseExtWallsType(const std::string &value);
 static Ptr<ChannelConditionModel> CreateChannelConditionModel(const std::string &typeName);
 static Ptr<PropagationLossModel> CreatePropagationLossModel(const std::string &typeName);
 static double ComputeLargeSmallFadingRxPower(TopologyRuntime &rt, FadingRuntimeState &state,
+                                             const LinkSpec &spec,
                                              const LinkMetricsSample &sample);
 static double ComputeWifiMatrixRxPower(TopologyRuntime &rt, FadingRuntimeState &state,
                                        const LinkSpec &spec,
@@ -2017,7 +2020,12 @@ ParseLinkSpec(const json &lnk, const TopologyConfig &cfg, const std::string &sec
   spec.enabled = OptionalBoolField(lnk, "enabled", true);
 
   spec.metricsFile = OptionalStringField(lnk, "metrics_file", "");
+  spec.dataRateExplicit = lnk.contains("data_rate");
   spec.dataRate = OptionalStringField(lnk, "data_rate", cfg.globals.defaultDataRate);
+  if (lnk.contains("tx_power_dbm"))
+  {
+    spec.txPowerDbm = OptionalNumberField(lnk, "tx_power_dbm", cfg.linkSimulation.txPowerDbm);
+  }
   spec.baseDelay = OptionalStringField(lnk, "base_delay", cfg.globals.defaultDelay);
 
   spec.lossMin = OptionalNumberField(lnk, "loss_min", 0.0);
@@ -4303,7 +4311,14 @@ UpdateMultipathFadingDeltaDb(TopologyRuntime &rt, FadingRuntimeState &state,
 }
 
 double
+EffectiveTxPowerDbm(const LinkSimulationConfig &sim, const LinkSpec &spec)
+{
+  return spec.txPowerDbm.value_or(sim.txPowerDbm);
+}
+
+double
 ComputeLargeSmallFadingRxPower(TopologyRuntime &rt, FadingRuntimeState &state,
+                               const LinkSpec &spec,
                                const LinkMetricsSample &sample)
 {
   const auto &sim = rt.config.linkSimulation;
@@ -4318,11 +4333,12 @@ ComputeLargeSmallFadingRxPower(TopologyRuntime &rt, FadingRuntimeState &state,
   rt.fadingSrcMobility->SetPosition(Vector(0.0, 0.0, 0.0));
   rt.fadingDstMobility->SetPosition(Vector(distanceM, 0.0, 0.0));
 
+  const double txPowerDbm = EffectiveTxPowerDbm(sim, spec);
   double rxPowerDbm =
-      rt.largeSmallPathLossModel->CalcRxPower(sim.txPowerDbm,
+      rt.largeSmallPathLossModel->CalcRxPower(txPowerDbm,
                                               rt.fadingSrcMobility,
                                               rt.fadingDstMobility);
-  state.pathLossDb = sim.txPowerDbm - rxPowerDbm;
+  state.pathLossDb = txPowerDbm - rxPowerDbm;
 
   const double shadowDb = UpdateShadowFadingDb(rt, state, distanceM, sample.speed);
   rxPowerDbm -= shadowDb;
@@ -4350,11 +4366,10 @@ double
 ComputeWifiMatrixRxPower(TopologyRuntime &rt, FadingRuntimeState &state,
                          const LinkSpec &spec, const LinkMetricsSample &sample)
 {
-  (void)spec;
   const auto &sim = rt.config.linkSimulation;
   if (sim.LargeSmallFading())
   {
-    return ComputeLargeSmallFadingRxPower(rt, state, sample);
+    return ComputeLargeSmallFadingRxPower(rt, state, spec, sample);
   }
 
   const double distanceM = std::max(0.001, sample.dist);
@@ -4371,7 +4386,7 @@ ComputeWifiMatrixRxPower(TopologyRuntime &rt, FadingRuntimeState &state,
   state.channelState = sample.hasPositions ? "LOS" : "UNKNOWN";
   state.multipathDeltaDb = 0.0;
   state.multipathResampled = false;
-  return sim.txPowerDbm - pathLossDb;
+  return EffectiveTxPowerDbm(sim, spec) - pathLossDb;
 }
 
 Vector
@@ -5197,7 +5212,7 @@ ComputeMacFrameAirtime(const LinkSimulationConfig &sim,
     return MilliSeconds(0);
   }
 
-  const std::string rate = sim.macDataRate.empty() ? spec.dataRate : sim.macDataRate;
+  const std::string rate = spec.dataRateExplicit ? spec.dataRate : sim.macDataRate;
   const DataRate dataRate = ParseDataRateOrDefault(rate, spec.dataRate);
   const uint64_t bitRate = dataRate.GetBitRate();
   if (bitRate == 0 || packetBytes == 0)
@@ -5283,7 +5298,7 @@ ComputeLinkLoss(TopologyRuntime &rt,
   const auto &sim = rt.config.linkSimulation;
   if (sim.LargeSmallFading())
   {
-    rxPowerDbm = ComputeLargeSmallFadingRxPower(rt, state, sample);
+    rxPowerDbm = ComputeLargeSmallFadingRxPower(rt, state, spec, sample);
     if (!std::isfinite(rxPowerDbm))
     {
       rawPacketErrorRate = ComputeLoss(spec, sample.dist);
@@ -5317,7 +5332,7 @@ ComputeLinkLoss(TopologyRuntime &rt,
   }
 
   rxPowerDbm =
-      rt.propagationLossModel->CalcRxPower(sim.txPowerDbm, srcMobilityIt->second, dstMobilityIt->second);
+      rt.propagationLossModel->CalcRxPower(EffectiveTxPowerDbm(sim, spec), srcMobilityIt->second, dstMobilityIt->second);
   fromPathloss = true;
   lossModel = sim.model + "/" + sim.linkErrorModel;
   const double packetErrorRate =
@@ -5545,7 +5560,7 @@ UpdateWifiAdhocLinks(TopologyRuntime &rt)
     if (std::isfinite(rxPowerDbm))
     {
       totalLossDb =
-          std::clamp(rt.config.linkSimulation.txPowerDbm - rxPowerDbm,
+          std::clamp(EffectiveTxPowerDbm(rt.config.linkSimulation, pl.spec) - rxPowerDbm,
                      0.0,
                      kWifiDefaultLossDb);
     }
@@ -6263,7 +6278,7 @@ RenderStatusPanel(TopologyRuntime &rt, double t)
     {
       const double matrixLossDb =
           std::isfinite(pl.currentRxPowerDbm)
-              ? rt.config.linkSimulation.txPowerDbm - pl.currentRxPowerDbm
+              ? EffectiveTxPowerDbm(rt.config.linkSimulation, pl.spec) - pl.currentRxPowerDbm
               : std::numeric_limits<double>::quiet_NaN();
 
       std::ostringstream oss;
