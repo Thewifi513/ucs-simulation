@@ -537,6 +537,28 @@ def normalize_video_stream_key(stream: str) -> str:
     }.get(stream.strip().lower(), stream.strip())
 
 
+def resolve_video_request(topology_path: Path, uav_id: str, stream: str) -> Tuple[str, str, int, str]:
+    topo = read_json(topology_path)
+    globals_ = topo.get("globals", {})
+    flows = globals_.get("business_flows", {})
+    stream_key = normalize_video_stream_key(stream)
+    video = flows.get(stream_key, {}) if isinstance(flows, dict) else {}
+    if not isinstance(video, dict) or not video.get("enabled", False):
+        raise ValueError(f"video stream is not enabled: {stream}")
+    port_base = int(video.get("port_base", 5600))
+    instances = topo.get("instances", [])
+    gs_id = globals_.get("gs_id", "gs")
+    gs = next((item for item in instances if item.get("id") == gs_id), None)
+    if not gs:
+        raise ValueError("ground station instance not found")
+    address = ip_only(str(gs.get("exp_ip") or globals_.get("experiment_net", {}).get("gs_ips", [""])[0]))
+    uav = next((item for item in instances if item.get("id") == uav_id), None)
+    if not uav:
+        raise ValueError(f"unknown UAV: {uav_id}")
+    port = port_base + int(uav.get("idx", 0))
+    return address, str(uav_id), port, stream_key
+
+
 def mavsdk_endpoint(topo: Dict[str, Any], inst: Dict[str, Any], gs_ip: str) -> Dict[str, Any]:
     idx = int(inst.get("idx", 0))
     globals_ = topo.get("globals", {})
@@ -1630,6 +1652,29 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 }
             )
             return
+        if parsed.path == "/api/video/start":
+            qs = parse_qs(parsed.query)
+            uav_id = str(qs.get("uav", [""])[0]).strip()
+            stream = str(qs.get("stream", ["sub"])[0])
+            if not uav_id:
+                self.send_json({"ok": False, "error": "missing uav"}, status=400)
+                return
+            try:
+                _address, resolved_uav, port, stream_key = resolve_video_request(self.server.topology_path, uav_id, stream)
+                sender = self.server.video_sender_manager.ensure(resolved_uav, stream_key, port)
+                self.send_json(
+                    {
+                        "ok": True,
+                        "uav": resolved_uav,
+                        "stream": stream_key,
+                        "port": port,
+                        "on_demand": self.server.video_sender_manager.enabled,
+                        "sender": None if sender is None else sender.snapshot(),
+                    }
+                )
+            except Exception as exc:
+                self.send_json({"ok": False, "error": str(exc)}, status=400)
+            return
         if parsed.path.startswith("/video/") and parsed.path.endswith(".mjpg"):
             uav_id = Path(parsed.path).name.removesuffix(".mjpg")
             qs = parse_qs(parsed.query)
@@ -1646,29 +1691,12 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, f"GStreamer unavailable: {GST_ERROR}")
             return
         try:
-            topo = read_json(self.server.topology_path)
-            globals_ = topo.get("globals", {})
-            flows = globals_.get("business_flows", {})
-            stream_key = normalize_video_stream_key(stream)
-            video = flows.get(stream_key, {}) if isinstance(flows, dict) else {}
-            if not isinstance(video, dict) or not video.get("enabled", False):
-                raise ValueError(f"video stream is not enabled: {stream}")
-            port_base = int(video.get("port_base", 5600))
-            instances = topo.get("instances", [])
-            gs_id = globals_.get("gs_id", "gs")
-            gs = next((item for item in instances if item.get("id") == gs_id), None)
-            if not gs:
-                raise ValueError("ground station instance not found")
-            address = ip_only(str(gs.get("exp_ip") or globals_.get("experiment_net", {}).get("gs_ips", [""])[0]))
-            uav = next((item for item in instances if item.get("id") == uav_id), None)
-            if not uav:
-                raise ValueError(f"unknown UAV: {uav_id}")
-            port = port_base + int(uav.get("idx", 0))
+            address, resolved_uav, port, stream_key = resolve_video_request(self.server.topology_path, uav_id, stream)
         except Exception as exc:
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
 
-        sender = self.server.video_sender_manager.ensure(uav_id, stream_key, port)
+        sender = self.server.video_sender_manager.ensure(resolved_uav, stream_key, port)
         key = (address, port, width, height, quality, self.server.video_decoder)
         receiver = self.server.video_receivers.setdefault(
             key,

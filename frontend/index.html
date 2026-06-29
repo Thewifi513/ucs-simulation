@@ -1418,6 +1418,7 @@
     let worldView = {zoom: 1, panX: 0, panY: 0};
     let worldDrag = null;
     let lastWorldFrame = null;
+    let videoStreamSerial = 0;
     const STATE_REFRESH_MS = 100;
     let stateRefreshInFlight = false;
     let lastUavTabsSignature = '';
@@ -1516,6 +1517,23 @@
 
     function controlWsIsActive() {
       return controlWs && (controlWs.readyState === WebSocket.OPEN || controlWs.readyState === WebSocket.CONNECTING);
+    }
+
+    function selectedVideoUrl() {
+      return `/video/${selectedUav}.mjpg?stream=sub&w=960&h=540&q=75&v=${videoStreamSerial}`;
+    }
+
+    function attachSelectedVideo(options = {}) {
+      const node = nodeById(selectedUav);
+      if (!node || node.type !== 'uav') return;
+      if (options.restart) videoStreamSerial += 1;
+      const frame = el('video-frame');
+      const url = selectedVideoUrl();
+      frame.style.display = 'block';
+      if (!frame.src.endsWith(url)) frame.src = url;
+      el('video-empty').style.display = 'grid';
+      el('video-empty-text').textContent = 'starting video stream ...';
+      fetch(`/api/video/start?uav=${encodeURIComponent(selectedUav)}&stream=sub`, {cache: 'no-store'}).catch(() => {});
     }
 
     function clearManualControlWs() {
@@ -1731,6 +1749,7 @@
           clearManualControlWs();
           syncControlEndpoint({force: true});
           renderAll();
+          attachSelectedVideo({restart: true});
           if (reconnect) setTimeout(connectControl, 160);
         };
         tabs.appendChild(btn);
@@ -1958,11 +1977,15 @@
       el('video-rx-badge').textContent = rxLabel;
       el('video-empty-text').textContent = `${node.camera_topic || ''}`;
       const shouldAttachVideo = Boolean(node.rtp_running || onDemandVideo);
-      el('video-empty').style.display = node.rtp_running ? 'none' : 'grid';
+      const hasFreshFrame = Boolean(receiver?.has_frame && Number(receiver.age_s || 0) < 2);
+      el('video-empty').style.display = hasFreshFrame ? 'none' : 'grid';
       const frame = el('video-frame');
-      const videoUrl = `/video/${selectedUav}.mjpg?w=960&h=540&q=75`;
+      const videoUrl = selectedVideoUrl();
       frame.style.display = shouldAttachVideo ? 'block' : 'none';
-      if (shouldAttachVideo && !frame.src.endsWith(videoUrl)) frame.src = videoUrl;
+      if (shouldAttachVideo && !frame.src.endsWith(videoUrl)) {
+        frame.src = videoUrl;
+        el('video-empty').style.display = 'grid';
+      }
       if (!shouldAttachVideo) frame.removeAttribute('src');
       frame.onerror = () => { el('video-empty').style.display = 'grid'; };
       frame.onload = () => { if (node.rtp_running || onDemandVideo) el('video-empty').style.display = 'none'; };
@@ -2076,6 +2099,7 @@
         if (protocol === 'legacy') controlWs.send('SECURE_TOKEN_123');
         else sendRelay({type: 'hello'}, target);
         setControlConnected(true);
+        attachSelectedVideo({restart: true});
         appendLog(`remote connected: ${target} ${url} (${protocol})`);
       };
       ws.onclose = () => {
