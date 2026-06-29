@@ -14,6 +14,10 @@ PORT="${PORT:-8088}"
 CONTROL_WS="${CONTROL_WS:-}"
 CONTROL_PROTOCOL="${CONTROL_PROTOCOL:-relay}"
 DASHBOARD_VIDEO_DECODER="${DASHBOARD_VIDEO_DECODER:-auto}"
+DASHBOARD_VIDEO_ON_DEMAND="${DASHBOARD_VIDEO_ON_DEMAND:-0}"
+DASHBOARD_VIDEO_SENDER_IDLE_SEC="${DASHBOARD_VIDEO_SENDER_IDLE_SEC:-45}"
+DASHBOARD_VIDEO_SENDER_ENCODER="${DASHBOARD_VIDEO_SENDER_ENCODER:-${VIDEO_ENCODER:-auto}}"
+DASHBOARD_VIDEO_SENDER_RUN_DIR="${DASHBOARD_VIDEO_SENDER_RUN_DIR:-}"
 
 usage() {
   cat <<EOF
@@ -27,6 +31,12 @@ Options:
   --control-protocol MODE     relay or legacy. Default: ${CONTROL_PROTOCOL}
   --video-decoder NAME        H.264 decoder: auto, hard, nvh264dec, vaapi, v4l2,
                               avdec_h264. Default: ${DASHBOARD_VIDEO_DECODER}
+  --video-on-demand           Start RTP camera senders only when a video stream is requested.
+  --no-video-on-demand        Keep using pre-started RTP camera senders.
+  --video-sender-idle-sec N   Stop on-demand senders after N idle seconds.
+                              Default: ${DASHBOARD_VIDEO_SENDER_IDLE_SEC}
+  --video-sender-encoder NAME Encoder for on-demand senders. Default: ${DASHBOARD_VIDEO_SENDER_ENCODER}
+  --video-sender-run-dir DIR  Log/pid directory for on-demand senders.
   --help                      Show this help.
 EOF
 }
@@ -63,6 +73,29 @@ while [[ $# -gt 0 ]]; do
       DASHBOARD_VIDEO_DECODER="$2"
       shift 2
       ;;
+    --video-on-demand)
+      DASHBOARD_VIDEO_ON_DEMAND=1
+      shift
+      ;;
+    --no-video-on-demand)
+      DASHBOARD_VIDEO_ON_DEMAND=0
+      shift
+      ;;
+    --video-sender-idle-sec)
+      [[ $# -ge 2 ]] || { echo "[dashboard_up][ERR] --video-sender-idle-sec requires a value" >&2; exit 1; }
+      DASHBOARD_VIDEO_SENDER_IDLE_SEC="$2"
+      shift 2
+      ;;
+    --video-sender-encoder)
+      [[ $# -ge 2 ]] || { echo "[dashboard_up][ERR] --video-sender-encoder requires a value" >&2; exit 1; }
+      DASHBOARD_VIDEO_SENDER_ENCODER="$2"
+      shift 2
+      ;;
+    --video-sender-run-dir)
+      [[ $# -ge 2 ]] || { echo "[dashboard_up][ERR] --video-sender-run-dir requires a directory" >&2; exit 1; }
+      DASHBOARD_VIDEO_SENDER_RUN_DIR="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -92,11 +125,25 @@ args=(
   --port "$PORT"
   --control-protocol "$CONTROL_PROTOCOL"
   --video-decoder "$DASHBOARD_VIDEO_DECODER"
+  --video-sender-idle-sec "$DASHBOARD_VIDEO_SENDER_IDLE_SEC"
+  --video-sender-encoder "$DASHBOARD_VIDEO_SENDER_ENCODER"
 )
+case "$DASHBOARD_VIDEO_ON_DEMAND" in
+  1|true|True|TRUE|yes|Yes|YES|on|On|ON)
+    args+=(--video-on-demand)
+    ;;
+  *)
+    args+=(--no-video-on-demand)
+    ;;
+esac
 if [[ -n "$CONTROL_WS" ]]; then
   args+=(--control-ws "$CONTROL_WS")
+fi
+if [[ -n "$DASHBOARD_VIDEO_SENDER_RUN_DIR" ]]; then
+  args+=(--video-sender-run-dir "$DASHBOARD_VIDEO_SENDER_RUN_DIR")
 fi
 
 echo "[dashboard_up] topology=${TOPOLOGY_FILE}"
 echo "[dashboard_up] url=http://127.0.0.1:${PORT}"
+echo "[dashboard_up] video_on_demand=${DASHBOARD_VIDEO_ON_DEMAND}"
 exec "${args[@]}"

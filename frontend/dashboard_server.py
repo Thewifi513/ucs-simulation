@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ipaddress
 import json
 import math
 import mmap
 import os
 import re
+import signal
 import struct
 import subprocess
 import sys
@@ -36,6 +38,8 @@ LINK_SHM_VERSION = 1
 LINK_SHM_HEADER = struct.Struct("<8sIIQddII16s")
 LINK_SHM_MAX_AGE_SEC = 5.0
 DASHBOARD_VIDEO_IDLE_SEC = 30.0
+DASHBOARD_VIDEO_SENDER_IDLE_SEC = 45.0
+RTP_CAMERA_FLOW_SH = MESH_DIR / "video" / "run_rtp_camera_flow.sh"
 
 try:
     import gi  # type: ignore
@@ -406,6 +410,15 @@ def process_lines(pattern: str) -> List[str]:
     return [line for line in stdout.splitlines() if "frontend/dashboard_server.py" not in line]
 
 
+def rtp_port_process_running(port: int) -> bool:
+    needle_space = f"--dst-port {port}"
+    needle_equal = f"--dst-port={port}"
+    return any(
+        needle_space in line or needle_equal in line
+        for line in process_lines(r"rtp_camera_bridge\.py")
+    )
+
+
 def pid_alive(pidfile: Path) -> bool:
     raw = read_text(pidfile)
     if not raw:
@@ -511,6 +524,17 @@ def video_flow_configs(topo: Dict[str, Any]) -> List[Dict[str, Any]]:
             }
         )
     return result
+
+
+def normalize_video_stream_key(stream: str) -> str:
+    return {
+        "sub": "video",
+        "preview": "video",
+        "dashboard": "video",
+        "main": "video_main",
+        "video_main": "video_main",
+        "video": "video",
+    }.get(stream.strip().lower(), stream.strip())
 
 
 def mavsdk_endpoint(topo: Dict[str, Any], inst: Dict[str, Any], gs_ip: str) -> Dict[str, Any]:
@@ -949,6 +973,224 @@ def build_state(topology_path: Path) -> Dict[str, Any]:
     }
 
 
+class OnDemandVideoSender:
+    def __init__(
+        self,
+        *,
+        uav_id: str,
+        stream_key: str,
+        port: int,
+        topology_path: Path,
+        encoder: str,
+        run_dir: Path,
+    ):
+        self.uav_id = uav_id
+        self.stream_key = stream_key
+        self.port = port
+        self.topology_path = topology_path
+        self.encoder = encoder
+        self.run_dir = run_dir
+        self.proc: Optional[subprocess.Popen] = None
+        self.external = False
+        self.started_at = 0.0
+        self.last_client_at = time.monotonic()
+        self.last_error = ""
+        self.log_path = run_dir / f"{uav_id}-{stream_key}.log"
+
+    def mark_client_active(self) -> None:
+        self.last_client_at = time.monotonic()
+
+    def is_running(self) -> bool:
+        if self.external:
+            return rtp_port_process_running(self.port)
+        return self.proc is not None and self.proc.poll() is None
+
+    def start(self) -> None:
+        self.mark_client_active()
+        if self.is_running():
+            return
+        self.external = False
+        self.proc = None
+        self.last_error = ""
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        if rtp_port_process_running(self.port):
+            self.external = True
+            self.started_at = time.monotonic()
+            print(
+                f"[dashboard] on-demand video sender adopted existing stream "
+                f"{self.uav_id}/{self.stream_key} port={self.port}",
+                flush=True,
+            )
+            return
+
+        cmd = [
+            str(RTP_CAMERA_FLOW_SH),
+            "--topology",
+            str(self.topology_path),
+            "--uav",
+            self.uav_id,
+            "--flow",
+            self.stream_key,
+            "--encoder",
+            self.encoder,
+        ]
+        env = os.environ.copy()
+        env["RTP_RUN_DIR"] = str(self.run_dir)
+        try:
+            log_fh = open(self.log_path, "ab", buffering=0)
+            try:
+                self.proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(MESH_DIR),
+                    env=env,
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=hasattr(os, "setsid"),
+                )
+            finally:
+                log_fh.close()
+            self.started_at = time.monotonic()
+            print(
+                f"[dashboard] on-demand video sender started "
+                f"{self.uav_id}/{self.stream_key} port={self.port} "
+                f"pid={self.proc.pid} log={self.log_path}",
+                flush=True,
+            )
+        except Exception as exc:
+            self.last_error = str(exc)
+            self.proc = None
+            print(
+                f"[dashboard][ERR] failed to start on-demand video sender "
+                f"{self.uav_id}/{self.stream_key}: {exc}",
+                flush=True,
+            )
+
+    def stop(self) -> None:
+        if self.external:
+            self.external = False
+            return
+        proc = self.proc
+        self.proc = None
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(proc.pid, signal.SIGTERM)
+            else:
+                proc.terminate()
+            proc.wait(timeout=5.0)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(Exception):
+                if hasattr(os, "killpg"):
+                    os.killpg(proc.pid, signal.SIGKILL)
+                else:
+                    proc.kill()
+        except Exception as exc:
+            self.last_error = str(exc)
+        print(
+            f"[dashboard] on-demand video sender stopped "
+            f"{self.uav_id}/{self.stream_key} port={self.port}",
+            flush=True,
+        )
+
+    def snapshot(self, now: Optional[float] = None) -> Dict[str, Any]:
+        now = time.monotonic() if now is None else now
+        proc = self.proc
+        return {
+            "uav_id": self.uav_id,
+            "stream": self.stream_key,
+            "port": self.port,
+            "running": self.is_running(),
+            "external": self.external,
+            "pid": None if proc is None else proc.pid,
+            "idle_s": max(0.0, now - self.last_client_at),
+            "started_s": None if not self.started_at else max(0.0, now - self.started_at),
+            "log": str(self.log_path),
+            "error": self.last_error,
+        }
+
+
+class OnDemandVideoSenderManager:
+    def __init__(
+        self,
+        *,
+        enabled: bool,
+        topology_path: Path,
+        encoder: str,
+        idle_sec: float,
+        run_dir: Path,
+    ):
+        self.enabled = enabled
+        self.topology_path = topology_path
+        self.encoder = encoder
+        self.idle_sec = max(1.0, idle_sec)
+        self.run_dir = run_dir
+        self.lock = threading.Lock()
+        self.senders: Dict[Tuple[str, str, int], OnDemandVideoSender] = {}
+        self.stop_event = threading.Event()
+        self.monitor_thread: Optional[threading.Thread] = None
+
+    def ensure(self, uav_id: str, stream_key: str, port: int) -> Optional[OnDemandVideoSender]:
+        if not self.enabled:
+            return None
+        key = (uav_id, stream_key, port)
+        with self.lock:
+            sender = self.senders.get(key)
+            if sender is None:
+                sender = OnDemandVideoSender(
+                    uav_id=uav_id,
+                    stream_key=stream_key,
+                    port=port,
+                    topology_path=self.topology_path,
+                    encoder=self.encoder,
+                    run_dir=self.run_dir / f"{uav_id}-{stream_key}",
+                )
+                self.senders[key] = sender
+            sender.start()
+            self._ensure_monitor_locked()
+            return sender
+
+    def _ensure_monitor_locked(self) -> None:
+        if self.monitor_thread is not None and self.monitor_thread.is_alive():
+            return
+        self.stop_event.clear()
+        self.monitor_thread = threading.Thread(target=self._monitor_loop, name="video-sender-monitor", daemon=True)
+        self.monitor_thread.start()
+
+    def _monitor_loop(self) -> None:
+        while not self.stop_event.wait(2.0):
+            now = time.monotonic()
+            stale: List[Tuple[Tuple[str, str, int], OnDemandVideoSender]] = []
+            with self.lock:
+                for key, sender in list(self.senders.items()):
+                    idle_for = now - sender.last_client_at
+                    if not sender.is_running():
+                        stale.append((key, sender))
+                    elif idle_for > self.idle_sec:
+                        stale.append((key, sender))
+                for key, _sender in stale:
+                    self.senders.pop(key, None)
+            for _key, sender in stale:
+                sender.stop()
+
+    def mark_active(self, sender: Optional[OnDemandVideoSender]) -> None:
+        if sender is not None:
+            sender.mark_client_active()
+
+    def snapshot(self) -> List[Dict[str, Any]]:
+        now = time.monotonic()
+        with self.lock:
+            return [sender.snapshot(now) for sender in self.senders.values()]
+
+    def stop_all(self) -> None:
+        self.stop_event.set()
+        with self.lock:
+            senders = list(self.senders.values())
+            self.senders.clear()
+        for sender in senders:
+            sender.stop()
+
+
 class VideoReceiver:
     def __init__(
         self,
@@ -1362,6 +1604,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         stream_port = parse_int(stream.get("port"), -1)
                         if stream_port in receiver_by_port:
                             stream["receiver"] = receiver_by_port[stream_port]
+                payload["video_proxy"]["on_demand"] = self.server.video_sender_manager.enabled
+                payload["video_proxy"]["senders"] = self.server.video_sender_manager.snapshot()
                 self.send_json(payload)
             except Exception as exc:
                 self.send_json({"error": str(exc)}, status=500)
@@ -1379,6 +1623,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                         "drop_on_latency": self.server.video_drop_on_latency,
                         "udp_buffer_bytes": self.server.video_udp_buffer_bytes,
                         "decoder": self.server.video_decoder,
+                        "on_demand": self.server.video_sender_manager.enabled,
+                        "sender_idle_sec": self.server.video_sender_manager.idle_sec,
+                        "sender_encoder": self.server.video_sender_manager.encoder,
                     },
                 }
             )
@@ -1402,14 +1649,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             topo = read_json(self.server.topology_path)
             globals_ = topo.get("globals", {})
             flows = globals_.get("business_flows", {})
-            stream_key = {
-                "sub": "video",
-                "preview": "video",
-                "dashboard": "video",
-                "main": "video_main",
-                "video_main": "video_main",
-                "video": "video",
-            }.get(stream.strip().lower(), stream.strip())
+            stream_key = normalize_video_stream_key(stream)
             video = flows.get(stream_key, {}) if isinstance(flows, dict) else {}
             if not isinstance(video, dict) or not video.get("enabled", False):
                 raise ValueError(f"video stream is not enabled: {stream}")
@@ -1428,6 +1668,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             self.send_error(HTTPStatus.BAD_REQUEST, str(exc))
             return
 
+        sender = self.server.video_sender_manager.ensure(uav_id, stream_key, port)
         key = (address, port, width, height, quality, self.server.video_decoder)
         receiver = self.server.video_receivers.setdefault(
             key,
@@ -1457,6 +1698,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         try:
             while True:
                 receiver.mark_client_active()
+                self.server.video_sender_manager.mark_active(sender)
                 seq, frame = receiver.wait_frame(seq)
                 if frame is None:
                     if receiver.error:
@@ -1485,6 +1727,10 @@ class DashboardHTTPServer(ThreadingHTTPServer):
         video_drop_on_latency: bool,
         video_udp_buffer_bytes: int,
         video_decoder: str,
+        video_on_demand: bool,
+        video_sender_idle_sec: float,
+        video_sender_encoder: str,
+        video_sender_run_dir: Path,
     ):
         self.topology_path = topology_path
         self.control_ws = control_ws
@@ -1494,11 +1740,19 @@ class DashboardHTTPServer(ThreadingHTTPServer):
         self.video_udp_buffer_bytes = max(0, video_udp_buffer_bytes)
         self.video_decoder = video_decoder
         self.video_receivers: Dict[Tuple[str, int, int, int, int, str], VideoReceiver] = {}
+        self.video_sender_manager = OnDemandVideoSenderManager(
+            enabled=video_on_demand,
+            topology_path=topology_path,
+            encoder=video_sender_encoder,
+            idle_sec=video_sender_idle_sec,
+            run_dir=video_sender_run_dir,
+        )
         super().__init__(server_address, handler_class)
 
     def server_close(self) -> None:
         for receiver in list(getattr(self, "video_receivers", {}).values()):
             receiver.stop()
+        self.video_sender_manager.stop_all()
         super().server_close()
 
 
@@ -1541,6 +1795,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "Default: auto"
         ),
     )
+    parser.add_argument(
+        "--video-on-demand",
+        action=argparse.BooleanOptionalAction,
+        default=parse_bool(os.environ.get("DASHBOARD_VIDEO_ON_DEMAND"), False),
+        help="Start RTP camera senders only when /video/<uav>.mjpg is requested. Default: false",
+    )
+    parser.add_argument(
+        "--video-sender-idle-sec",
+        type=float,
+        default=parse_float(os.environ.get("DASHBOARD_VIDEO_SENDER_IDLE_SEC"), DASHBOARD_VIDEO_SENDER_IDLE_SEC),
+        help=f"Stop on-demand RTP senders after this many idle seconds. Default: {DASHBOARD_VIDEO_SENDER_IDLE_SEC:g}",
+    )
+    parser.add_argument(
+        "--video-sender-encoder",
+        default=os.environ.get("DASHBOARD_VIDEO_SENDER_ENCODER", os.environ.get("VIDEO_ENCODER", "auto")),
+        help="Encoder passed to video/run_rtp_camera_flow.sh for on-demand senders. Default: VIDEO_ENCODER or auto",
+    )
+    parser.add_argument(
+        "--video-sender-run-dir",
+        default=os.environ.get("DASHBOARD_VIDEO_SENDER_RUN_DIR", f"/tmp/ucs-mesh-{os.getuid()}/dashboard-rtp"),
+        help="Directory for on-demand RTP sender logs and pid files.",
+    )
     return parser
 
 
@@ -1565,6 +1841,10 @@ def main() -> int:
         video_drop_on_latency=args.video_drop_on_latency,
         video_udp_buffer_bytes=args.video_udp_buffer_bytes,
         video_decoder=args.video_decoder,
+        video_on_demand=args.video_on_demand,
+        video_sender_idle_sec=args.video_sender_idle_sec,
+        video_sender_encoder=args.video_sender_encoder,
+        video_sender_run_dir=Path(args.video_sender_run_dir).expanduser().resolve(),
     )
     print(f"[dashboard] topology={topology_path}", flush=True)
     print(f"[dashboard] listening=http://{args.host}:{args.port}", flush=True)
@@ -1577,7 +1857,21 @@ def main() -> int:
         f"decoder={httpd.video_decoder}",
         flush=True,
     )
+    print(
+        "[dashboard] video_on_demand="
+        f"{httpd.video_sender_manager.enabled} "
+        f"sender_encoder={httpd.video_sender_manager.encoder} "
+        f"sender_idle_sec={httpd.video_sender_manager.idle_sec:g} "
+        f"sender_run_dir={httpd.video_sender_manager.run_dir}",
+        flush=True,
+    )
     print(f"[dashboard] control_ws={control_ws} protocol={args.control_protocol}", flush=True)
+
+    def _stop_on_signal(_signum: int, _frame: Any) -> None:
+        raise KeyboardInterrupt
+
+    with contextlib.suppress(Exception):
+        signal.signal(signal.SIGTERM, _stop_on_signal)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

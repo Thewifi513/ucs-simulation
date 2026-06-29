@@ -1935,6 +1935,7 @@
       const node = nodeById(selectedUav);
       if (!node) return;
       const receivers = state.video_proxy?.receivers || [];
+      const onDemandVideo = Boolean(state.video_proxy?.on_demand);
       const streams = node.video_streams || [];
       const subStream = streams.find((item) => item.key === 'video') || {};
       const mainStream = streams.find((item) => item.key === 'video_main') || {};
@@ -1956,13 +1957,15 @@
       el('video-uav-badge').textContent = `${node.id} · ${ipShort(node.exp_ip)} · ${streamText}`;
       el('video-rx-badge').textContent = rxLabel;
       el('video-empty-text').textContent = `${node.camera_topic || ''}`;
+      const shouldAttachVideo = Boolean(node.rtp_running || onDemandVideo);
       el('video-empty').style.display = node.rtp_running ? 'none' : 'grid';
       const frame = el('video-frame');
       const videoUrl = `/video/${selectedUav}.mjpg?w=960&h=540&q=75`;
-      frame.style.display = node.rtp_running ? 'block' : 'none';
-      if (node.rtp_running && !frame.src.endsWith(videoUrl)) frame.src = videoUrl;
+      frame.style.display = shouldAttachVideo ? 'block' : 'none';
+      if (shouldAttachVideo && !frame.src.endsWith(videoUrl)) frame.src = videoUrl;
+      if (!shouldAttachVideo) frame.removeAttribute('src');
       frame.onerror = () => { el('video-empty').style.display = 'grid'; };
-      frame.onload = () => { if (node.rtp_running) el('video-empty').style.display = 'none'; };
+      frame.onload = () => { if (node.rtp_running || onDemandVideo) el('video-empty').style.display = 'none'; };
 
       const cs = node.container_status || {};
       el('uav-title').textContent = `${node.id} · ${node.model_name || '--'}`;

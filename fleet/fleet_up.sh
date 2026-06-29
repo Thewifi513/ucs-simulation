@@ -45,6 +45,7 @@ VIDEO_ENCODER_EXPLICIT=0
 VIDEO_ENCODER="${VIDEO_ENCODER:-auto}"
 DASHBOARD_VIDEO_DECODER_EXPLICIT=0
 [[ -n "${DASHBOARD_VIDEO_DECODER:-}" ]] && DASHBOARD_VIDEO_DECODER_EXPLICIT=1
+DASHBOARD_VIDEO_SENDER_IDLE_SEC="${DASHBOARD_VIDEO_SENDER_IDLE_SEC:-45}"
 DASHBOARD_MODE="${UCS_MESH_DASHBOARD_MODE:-auto}"
 DASHBOARD_HOST="${DASHBOARD_HOST:-0.0.0.0}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8088}"
@@ -79,7 +80,7 @@ CONTROL_DOWN_SH="${MESH_DIR}/control/control_down.sh"
 
 usage() {
   cat <<EOF2
-Usage: $(basename "$0") [--topology FILE] [--terminal-mode MODE] [--headless|--gui] [--with-video|--no-video] [--with-video-main|--no-video-main] [--with-control|--no-control] [--with-dashboard|--no-dashboard] [--with-bmv2|--no-bmv2] [--verbose] [--help]
+Usage: $(basename "$0") [--topology FILE] [--terminal-mode MODE] [--headless|--gui] [--with-video|--no-video|--video-on-demand] [--with-video-main|--no-video-main] [--with-control|--no-control] [--with-dashboard|--no-dashboard] [--with-bmv2|--no-bmv2] [--verbose] [--help]
 
 --topology FILE   Topology JSON file. Default: ${DEFAULT_TOPOLOGY}
 --terminal-mode MODE
@@ -88,6 +89,7 @@ Usage: $(basename "$0") [--topology FILE] [--terminal-mode MODE] [--headless|--g
 --gui             Start Gazebo with GUI through world_up.sh.
 --with-video      Start topology-defined RTP camera preview streams.
 --no-video        Do not start RTP camera streams.
+--video-on-demand Start only the RTP camera stream requested by the dashboard.
 --with-video-main Start the 1080p main RTP stream in addition to the default
                   preview substream. Default: ${VIDEO_MAIN_MODE}
 --no-video-main   Keep only the default preview substream.
@@ -157,6 +159,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-video)
       VIDEO_MODE="off"
+      shift
+      ;;
+    --video-on-demand|--with-video-on-demand)
+      VIDEO_MODE="on-demand"
       shift
       ;;
     --with-video-main)
@@ -255,10 +261,13 @@ case "$WORLD_GUI" in
 esac
 
 case "$VIDEO_MODE" in
-  auto|on|off) ;;
+  ondemand|demand)
+    VIDEO_MODE="on-demand"
+    ;;
+  auto|on|off|on-demand) ;;
   *)
     echo "[mesh_up][ERR] unsupported video mode: $VIDEO_MODE" >&2
-    echo "[mesh_up][ERR] expected: auto, on, or off" >&2
+    echo "[mesh_up][ERR] expected: auto, on, off, or on-demand" >&2
     exit 1
     ;;
 esac
@@ -666,6 +675,9 @@ video_should_start() {
     off)
       return 1
       ;;
+    on-demand)
+      return 1
+      ;;
     auto)
       [[ "$TOPOLOGY_VIDEO_ENABLED" == "1" ]]
       ;;
@@ -982,6 +994,14 @@ start_dashboard() {
   )
   if [[ "$CONTROL_UAV" != "all" ]]; then
     dashboard_args+=(--control-ws "ws://127.0.0.1:${CONTROL_RELAY_PORT}")
+  fi
+  if [[ "$VIDEO_MODE" == "on-demand" ]]; then
+    dashboard_args+=(
+      --video-on-demand
+      --video-sender-encoder "$VIDEO_ENCODER"
+      --video-sender-idle-sec "$DASHBOARD_VIDEO_SENDER_IDLE_SEC"
+      --video-sender-run-dir "${RTP_RUN_DIR}/on-demand"
+    )
   fi
   local dashboard_pid
   dashboard_pid="$(start_detached_logged "$DASHBOARD_LOGFILE" \
