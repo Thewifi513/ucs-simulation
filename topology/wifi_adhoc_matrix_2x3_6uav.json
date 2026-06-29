@@ -347,10 +347,26 @@
       "p4info": "p4/build/ucs_edge_cluster_route.p4info.txt"
     },
     "routing": {
-      "mode": "adaptive_prior",
+      "mode": "adaptive_resource",
       "cluster_heads": {
         "1": "uav01",
         "2": "uav04"
+      },
+      "resource_nodes": [
+        "uav01",
+        "uav02"
+      ],
+      "node_resource_defaults": {
+        "role": "ordinary",
+        "tx_power_dbm": 20.0,
+        "bandwidth_mbps": 20.0,
+        "relay_penalty": 1.0
+      },
+      "resource_node_defaults": {
+        "role": "link_resource",
+        "tx_power_dbm": 27.0,
+        "bandwidth_mbps": 80.0,
+        "relay_penalty": 0.2
       }
     },
     "gs_edge": {

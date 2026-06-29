@@ -1259,7 +1259,7 @@
               <span class="legend-item"><span class="swatch good"></span>good</span>
               <span class="legend-item"><span class="swatch warn"></span>warn</span>
               <span class="legend-item"><span class="swatch bad"></span>bad</span>
-              <span class="legend-item"><span class="dot good"></span>cluster head</span>
+              <span class="legend-item"><span class="dot good"></span><span id="legend-special-node">cluster head</span></span>
             </div>
           </div>
         </section>
@@ -1573,6 +1573,20 @@
       return !mode || mode === 'cluster_heads' || mode === 'cluster_head_routes';
     }
 
+    function usesResourceScheduling() {
+      const mode = routingMode();
+      return mode === 'adaptive_resource'
+        || mode === 'adaptive_resources'
+        || mode === 'resource_adaptive'
+        || mode === 'resource_scheduled'
+        || mode === 'scheduled_resource';
+    }
+
+    function resourceNodeSet() {
+      const ids = state?.topology?.programmable_routing?.resource_nodes || [];
+      return new Set(Array.isArray(ids) ? ids.map((id) => String(id)) : []);
+    }
+
     function clusterHeadMap() {
       if (!usesFixedClusterHeads()) return new Map();
       const configured = state?.topology?.programmable_routing?.cluster_heads || {};
@@ -1610,10 +1624,15 @@
         && String(src.cluster_id) === String(dst.cluster_id);
     }
 
+    function isRoutableUavLink(src, dst) {
+      if (src?.type !== 'uav' || dst?.type !== 'uav') return false;
+      return usesResourceScheduling() || isIntraClusterUav(src, dst);
+    }
+
     function isWorldTopologyLink(link) {
       const src = nodeById(link.src);
       const dst = nodeById(link.dst);
-      return Boolean(src?.position && dst?.position && (isGroundToUav(src, dst) || isIntraClusterUav(src, dst)));
+      return Boolean(src?.position && dst?.position && (isGroundToUav(src, dst) || isRoutableUavLink(src, dst)));
     }
 
     function routeKeysFromPath(path) {
@@ -1953,11 +1972,14 @@
       });
 
       const headIds = clusterHeadIdSet();
+      const resourceIds = resourceNodeSet();
+      el('legend-special-node').textContent = usesResourceScheduling() ? 'resource node' : 'cluster head';
       (state.nodes || []).forEach((node) => {
         if (!node.position) return;
         const p = canvasPoint(node.position, transform);
         const isSelected = node.id === selectedUav;
         const isHead = headIds.has(node.id);
+        const isResource = resourceIds.has(node.id);
         if (isSelected) {
           ctx.beginPath();
           ctx.arc(p.x, p.y, 14, 0, Math.PI * 2);
@@ -1966,13 +1988,13 @@
         }
         ctx.beginPath();
         ctx.arc(p.x, p.y, node.type === 'ground_station' ? 8 : 7, 0, Math.PI * 2);
-        ctx.fillStyle = node.type === 'ground_station' ? '#0c2230' : (isHead ? '#16825d' : '#1677a3');
+        ctx.fillStyle = node.type === 'ground_station' ? '#0c2230' : (isHead || isResource ? '#16825d' : '#1677a3');
         ctx.fill();
         ctx.lineWidth = isSelected ? 4 : 2;
         ctx.strokeStyle = isSelected ? '#f5c542' : '#ffffff';
         ctx.stroke();
         ctx.textAlign = 'center';
-        if (node.type === 'ground_station' || isSelected || isHead) {
+        if (node.type === 'ground_station' || isSelected || isHead || isResource) {
           ctx.font = '700 12px Inter, Arial';
           ctx.strokeStyle = 'rgba(255, 255, 255, 0.84)';
           ctx.lineWidth = 3;
@@ -2034,7 +2056,9 @@
       el('fact-qgc').textContent = node.qgc_port || '--';
       el('fact-mavsdk').textContent = node.mavsdk_remote_port ? `${node.mavsdk_url || ''}` : '--';
       el('fact-rtp').textContent = mainStream.port ? `${node.video_port || '--'} / ${mainStream.port}` : (node.video_port || '--');
-      el('fact-cluster').textContent = `${node.cluster_id || '--'}${clusterHeadIdSet().has(node.id) ? ' / head' : ''}`;
+      const resourceSuffix = resourceNodeSet().has(node.id) ? ' / resource' : '';
+      const headSuffix = clusterHeadIdSet().has(node.id) ? ' / head' : '';
+      el('fact-cluster').textContent = `${node.cluster_id || '--'}${headSuffix}${resourceSuffix}`;
       if (node.position) {
         el('fact-position').textContent = `${fmt(node.position.x, 1)}, ${fmt(node.position.y, 1)}, ${fmt(node.position.z, 1)}`;
       } else {

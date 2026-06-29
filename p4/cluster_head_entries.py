@@ -38,7 +38,14 @@ FIELD_RE = re.compile(r"(\w+)=([^\s]+)")
 
 CLUSTER_HEAD_MODES = {"cluster_heads", "cluster_head_routes"}
 ADAPTIVE_PRIOR_MODES = {"adaptive_prior", "adaptive_prior_loss", "prior_adaptive", "adaptive"}
-ROUTING_ENTRY_MODES = CLUSTER_HEAD_MODES | ADAPTIVE_PRIOR_MODES
+ADAPTIVE_RESOURCE_MODES = {
+    "adaptive_resource",
+    "adaptive_resources",
+    "resource_adaptive",
+    "resource_scheduled",
+    "scheduled_resource",
+}
+ROUTING_ENTRY_MODES = CLUSTER_HEAD_MODES | ADAPTIVE_PRIOR_MODES | ADAPTIVE_RESOURCE_MODES
 
 EXPLICIT_COST_KEYS = (
     "routing_cost",
@@ -65,6 +72,7 @@ OBSTRUCTION_KEYS = (
     "obstruction_raw_loss_db",
     "prior_obstruction_loss_db",
 )
+RESOURCE_ROLE_KEYS = {"link_resource", "resource", "relay_resource", "high_resource"}
 
 
 def cidr_ip(cidr: str) -> str:
@@ -102,9 +110,18 @@ def normalize_routing_mode(value: str) -> str:
         return "cluster_heads"
     if mode in ADAPTIVE_PRIOR_MODES:
         return "adaptive_prior"
+    if mode in ADAPTIVE_RESOURCE_MODES:
+        return "adaptive_resource"
     raise ValueError(
         f"unsupported routing mode: {mode}; expected one of {', '.join(sorted(ROUTING_ENTRY_MODES))}"
     )
+
+
+def routing_config(topo: dict[str, Any]) -> dict[str, Any]:
+    globals_ = topo.get("globals", {})
+    programmable = topo.get("programmable_net", globals_.get("programmable_net", {}))
+    routing = programmable.get("routing", {}) if isinstance(programmable, dict) else {}
+    return routing if isinstance(routing, dict) else {}
 
 
 def resolve_air_port(topo: dict[str, Any]) -> int:
@@ -140,6 +157,29 @@ def finite_float(value: Any) -> float | None:
     if not math.isfinite(number):
         return None
     return number
+
+
+def data_rate_mbps(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    text = str(value).strip().lower()
+    match = re.fullmatch(r"([-+]?\d+(?:\.\d+)?)\s*([kmgt]?)(?:bit/s|bps|b/s|bit|b)?", text)
+    if not match:
+        match = re.fullmatch(r"([-+]?\d+(?:\.\d+)?)\s*([kmgt]?)", text)
+    if not match:
+        return finite_float(value)
+    number = finite_float(match.group(1))
+    if number is None:
+        return None
+    unit = match.group(2)
+    scale = {
+        "": 1.0 / 1_000_000.0,
+        "k": 1.0 / 1_000.0,
+        "m": 1.0,
+        "g": 1_000.0,
+        "t": 1_000_000.0,
+    }[unit]
+    return number * scale
 
 
 def nested_dicts(source: dict[str, Any]) -> list[dict[str, Any]]:
@@ -225,6 +265,89 @@ def endpoint_positions(
                 positions[endpoint] = pos
                 latest_mtime[endpoint] = mtime
     return positions
+
+
+def node_resource_profiles(
+    topo: dict[str, Any],
+    instances: list[dict[str, Any]],
+    link_sim: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    routing = routing_config(topo)
+    defaults = routing.get("node_resource_defaults", {})
+    if not isinstance(defaults, dict):
+        defaults = {}
+
+    default_tx = (
+        finite_float(defaults.get("tx_power_dbm"))
+        or finite_float(link_sim.get("tx_power_dbm"))
+        or 20.0
+    )
+    default_bandwidth = (
+        finite_float(defaults.get("bandwidth_mbps"))
+        or data_rate_mbps(defaults.get("bandwidth"))
+        or data_rate_mbps(link_sim.get("mac_data_rate"))
+        or 20.0
+    )
+    ordinary_penalty = finite_float(defaults.get("relay_penalty")) or 1.0
+    resource_defaults = routing.get("resource_node_defaults", {})
+    if not isinstance(resource_defaults, dict):
+        resource_defaults = {}
+    resource_tx = finite_float(resource_defaults.get("tx_power_dbm")) or max(default_tx + 6.0, default_tx)
+    resource_bandwidth = (
+        finite_float(resource_defaults.get("bandwidth_mbps"))
+        or data_rate_mbps(resource_defaults.get("bandwidth"))
+        or max(default_bandwidth * 4.0, default_bandwidth)
+    )
+    resource_penalty = finite_float(resource_defaults.get("relay_penalty")) or 0.25
+
+    resource_nodes_raw = routing.get("resource_nodes", [])
+    resource_nodes = {
+        str(item)
+        for item in resource_nodes_raw
+        if isinstance(resource_nodes_raw, list)
+    }
+    node_overrides = routing.get("node_resources", {})
+    if not isinstance(node_overrides, dict):
+        node_overrides = {}
+
+    profiles: dict[str, dict[str, Any]] = {}
+    for inst in instances:
+        node_id = str(inst.get("id", ""))
+        if not node_id:
+            continue
+        override = node_overrides.get(node_id, {})
+        if not isinstance(override, dict):
+            override = {}
+        inst_resource = inst.get("link_resource", {})
+        if isinstance(inst_resource, dict):
+            override = {**inst_resource, **override}
+
+        role = str(override.get("role") or ("link_resource" if node_id in resource_nodes else "ordinary"))
+        is_resource = role in RESOURCE_ROLE_KEYS or node_id in resource_nodes
+        base_tx = resource_tx if is_resource else default_tx
+        base_bandwidth = resource_bandwidth if is_resource else default_bandwidth
+        base_penalty = resource_penalty if is_resource else ordinary_penalty
+
+        tx_power = finite_float(override.get("tx_power_dbm")) or base_tx
+        bandwidth = (
+            finite_float(override.get("bandwidth_mbps"))
+            or data_rate_mbps(override.get("bandwidth"))
+            or base_bandwidth
+        )
+        relay_penalty = finite_float(override.get("relay_penalty"))
+        if relay_penalty is None:
+            relay_penalty = base_penalty
+
+        profiles[node_id] = {
+            "role": role,
+            "is_resource": is_resource,
+            "tx_power_dbm": tx_power,
+            "bandwidth_mbps": bandwidth,
+            "relay_penalty": max(0.0, relay_penalty),
+            "default_tx_power_dbm": default_tx,
+            "default_bandwidth_mbps": default_bandwidth,
+        }
+    return profiles
 
 
 def read_pair_metrics(raw_link: dict[str, Any], max_age_sec: float) -> dict[str, Any]:
@@ -492,6 +615,7 @@ def estimate_link_cost(
     raw_link: dict[str, Any],
     positions: dict[str, dict[str, float]],
     link_sim: dict[str, Any],
+    node_profiles: dict[str, dict[str, Any]],
 ) -> tuple[float, dict[str, Any]]:
     explicit_cost = first_number(raw_link, EXPLICIT_COST_KEYS)
     if explicit_cost is not None:
@@ -502,6 +626,8 @@ def estimate_link_cost(
     dst = str(raw_link.get("dst", ""))
     src_pos = positions.get(src)
     dst_pos = positions.get(dst)
+    src_profile = node_profiles.get(src, {})
+    dst_profile = node_profiles.get(dst, {})
 
     dist = first_number(raw_link, DISTANCE_KEYS) or 0.0
     obstruction_loss_value = first_number(raw_link, OBSTRUCTION_KEYS)
@@ -515,7 +641,11 @@ def estimate_link_cost(
         path_loss = estimate_path_loss_db(dist, link_sim)
         tx_power = first_number(raw_link, ("tx_power_dbm", "prior_tx_power_dbm"))
         if tx_power is None:
-            tx_power = finite_float(link_sim.get("tx_power_dbm")) or 20.0
+            tx_power = max(
+                finite_float(src_profile.get("tx_power_dbm")) or 0.0,
+                finite_float(dst_profile.get("tx_power_dbm")) or 0.0,
+                finite_float(link_sim.get("tx_power_dbm")) or 20.0,
+            )
         rx_sensitivity = first_number(raw_link, ("rx_sensitivity_dbm", "prior_rx_sensitivity_dbm"))
         if rx_sensitivity is None:
             rx_sensitivity = finite_float(link_sim.get("rx_sensitivity_dbm")) or -92.0
@@ -525,8 +655,29 @@ def estimate_link_cost(
     loss = first_number(raw_link, LOSS_KEYS)
     delay_ms = first_number(raw_link, DELAY_KEYS)
     jitter_ms = first_number(raw_link, JITTER_KEYS)
+    default_bandwidth = max(
+        1.0e-6,
+        finite_float(src_profile.get("default_bandwidth_mbps"))
+        or finite_float(dst_profile.get("default_bandwidth_mbps"))
+        or data_rate_mbps(link_sim.get("mac_data_rate"))
+        or 20.0,
+    )
+    edge_bandwidth = (
+        first_number(raw_link, ("bandwidth_mbps", "prior_bandwidth_mbps"))
+        or data_rate_mbps(raw_link.get("data_rate"))
+        or max(
+            finite_float(src_profile.get("bandwidth_mbps")) or 0.0,
+            finite_float(dst_profile.get("bandwidth_mbps")) or 0.0,
+            default_bandwidth,
+        )
+    )
+    edge_bandwidth = max(1.0e-6, edge_bandwidth)
+    relay_penalty = 0.5 * (
+        (finite_float(src_profile.get("relay_penalty")) or 0.0)
+        + (finite_float(dst_profile.get("relay_penalty")) or 0.0)
+    )
 
-    cost = 1.0
+    cost = max(0.05, default_bandwidth / edge_bandwidth) + relay_penalty
     if dist > 0.0:
         cost += dist / 50.0
     if obstruction_loss > 0.0:
@@ -552,6 +703,12 @@ def estimate_link_cost(
         "loss": loss,
         "delay_ms": delay_ms,
         "jitter_ms": jitter_ms,
+        "bandwidth_mbps": edge_bandwidth,
+        "tx_power_dbm": tx_power if src_pos and dst_pos else None,
+        "resource_roles": {
+            src: src_profile.get("role"),
+            dst: dst_profile.get("role"),
+        },
         "metrics_age_sec": first_number(raw_link, ("age_sec",)),
         "runtime_source": "link_state" if raw_link.get("link_state") else ("metrics" if raw_link.get("metrics") else "topology"),
     }
@@ -568,12 +725,14 @@ def build_adaptive_graph(
     gs_id: str,
     endpoint_cluster: dict[str, int],
     metrics_max_age_sec: float,
+    routing_mode: str,
 ) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]]]:
     globals_ = topo.get("globals", {})
     link_sim = globals_.get("link_simulation", {})
     if not isinstance(link_sim, dict):
         link_sim = {}
     positions = endpoint_positions(topo, instances, gs_id, metrics_max_age_sec)
+    node_profiles = node_resource_profiles(topo, instances, link_sim)
     link_state = runtime_link_state(topo, metrics_max_age_sec)
     graph: dict[str, dict[str, float]] = {}
     link_costs: list[dict[str, Any]] = []
@@ -593,7 +752,7 @@ def build_adaptive_graph(
         if (src_is_gs and dst_is_uav) or (dst_is_gs and src_is_uav):
             allowed = True
         elif src_is_uav and dst_is_uav:
-            allowed = endpoint_cluster.get(src) == endpoint_cluster.get(dst)
+            allowed = routing_mode == "adaptive_resource" or endpoint_cluster.get(src) == endpoint_cluster.get(dst)
         else:
             allowed = False
         if not allowed:
@@ -607,7 +766,7 @@ def build_adaptive_graph(
         if link_id in link_state:
             augmented_link["link_state"] = link_state[link_id]
 
-        cost, details = estimate_link_cost(augmented_link, positions, link_sim)
+        cost, details = estimate_link_cost(augmented_link, positions, link_sim, node_profiles)
         add_edge(graph, src, dst, cost)
         link_costs.append(
             {
@@ -661,9 +820,16 @@ def route_destinations(
     gs_id: str,
     uavs: list[dict[str, Any]],
     endpoint_cluster: dict[str, int],
+    routing_mode: str,
 ) -> list[str]:
     if target == gs_id:
         return [str(inst.get("id")) for inst in uavs]
+    if routing_mode == "adaptive_resource":
+        return [gs_id] + [
+            str(inst.get("id"))
+            for inst in uavs
+            if str(inst.get("id")) != target
+        ]
     cluster_id = endpoint_cluster[target]
     destinations = [gs_id]
     destinations.extend(
@@ -801,6 +967,7 @@ def adaptive_prior_route_entries_from_topology(
     endpoint_mac: dict[str, str],
     air_port: int,
     metrics_max_age_sec: float,
+    routing_mode: str,
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, list[str]]], list[dict[str, Any]]]:
     if target != gs_id and target not in by_id:
         raise SystemExit(f"[cluster-entries][ERR] unknown target id: {target}")
@@ -811,6 +978,7 @@ def adaptive_prior_route_entries_from_topology(
         gs_id,
         endpoint_cluster,
         metrics_max_age_sec,
+        routing_mode,
     )
     if target not in graph:
         raise SystemExit(f"[cluster-entries][ERR] no adaptive graph edges for target: {target}")
@@ -820,7 +988,7 @@ def adaptive_prior_route_entries_from_topology(
     routes: dict[str, dict[str, list[str]]] = {}
     src_mac = endpoint_mac[target]
 
-    for dst in route_destinations(target, gs_id, uavs, endpoint_cluster):
+    for dst in route_destinations(target, gs_id, uavs, endpoint_cluster, routing_mode):
         if dst not in distances:
             continue
         path = path_to(previous, target, dst)
@@ -913,6 +1081,7 @@ def main() -> int:
             endpoint_mac,
             air_port,
             args.metrics_max_age_sec,
+            routing_mode,
         )
 
     payload = {
@@ -923,6 +1092,15 @@ def main() -> int:
         "routes": routes,
         "link_costs": link_costs,
         "metrics_max_age_sec": args.metrics_max_age_sec,
+        "resource_nodes": [
+            node_id
+            for node_id, profile in node_resource_profiles(
+                topo,
+                instances,
+                globals_.get("link_simulation", {}) if isinstance(globals_.get("link_simulation", {}), dict) else {},
+            ).items()
+            if profile.get("is_resource")
+        ],
         "entries": entries,
     }
 

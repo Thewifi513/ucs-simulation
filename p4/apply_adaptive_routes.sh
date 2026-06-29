@@ -8,7 +8,7 @@ source "${MESH_DIR}/fleet/env_defaults.sh"
 DEFAULT_TOPOLOGY="${MESH_DIR}/topology/wifi_adhoc_matrix_2x3_6uav.json"
 
 TOPOLOGY_FILE="${TOPOLOGY_FILE:-$DEFAULT_TOPOLOGY}"
-ROUTING_MODE="${UCS_MESH_ROUTING_MODE:-adaptive_prior}"
+ROUTING_MODE="${UCS_MESH_ROUTING_MODE:-adaptive_resource}"
 ROUTING_METRICS_MAX_AGE_SEC="${UCS_MESH_ROUTING_METRICS_MAX_AGE_SEC:-15}"
 TARGET_FILTER=""
 DRY_RUN=0
@@ -22,7 +22,7 @@ Usage:
 Options:
   --topology FILE       Topology JSON file
   --target ID           Load only one UAV id or gs
-  --routing-mode MODE   Route entry mode. Default: adaptive_prior
+  --routing-mode MODE   Route entry mode. Default: adaptive_resource
   --routing-metrics-max-age-sec SEC
                         Max age for live routing metrics. Default: 15
   --dry-run             Print resolved P4Runtime targets without loading

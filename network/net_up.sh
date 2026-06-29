@@ -327,6 +327,11 @@ p4_route_entry_modes = {
     "adaptive",
     "adaptive_prior",
     "adaptive_prior_loss",
+    "adaptive_resource",
+    "adaptive_resources",
+    "resource_adaptive",
+    "resource_scheduled",
+    "scheduled_resource",
     "prior_adaptive",
 }
 if programmable_routing_mode and programmable_routing_mode not in p4_route_entry_modes:

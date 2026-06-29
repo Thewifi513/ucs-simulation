@@ -8,7 +8,7 @@ source "${MESH_DIR}/fleet/env_defaults.sh"
 DEFAULT_TOPOLOGY="${MESH_DIR}/topology/wifi_adhoc_matrix_2x3_6uav.json"
 
 TOPOLOGY_FILE="${TOPOLOGY_FILE:-$DEFAULT_TOPOLOGY}"
-ROUTING_MODE="${UCS_MESH_ROUTING_MODE:-adaptive_prior}"
+ROUTING_MODE="${UCS_MESH_ROUTING_MODE:-adaptive_resource}"
 ROUTING_METRICS_MAX_AGE_SEC="${UCS_MESH_ROUTING_METRICS_MAX_AGE_SEC:-15}"
 INTERVAL_SEC="${UCS_MESH_ADAPTIVE_ROUTE_INTERVAL_SEC:-5}"
 TARGETS_CSV="${UCS_MESH_ADAPTIVE_ROUTE_TARGETS:-}"
@@ -26,7 +26,7 @@ Options:
   --topology FILE       Topology JSON file
   --targets CSV         Targets to watch, e.g. gs,uav05. Default: gs plus all UAVs
   --interval-sec SEC    Recompute interval. Default: 5
-  --routing-mode MODE   Route entry mode. Default: adaptive_prior
+  --routing-mode MODE   Route entry mode. Default: adaptive_resource
   --routing-metrics-max-age-sec SEC
                         Max age for live routing metrics. Default: 15
   --once                Run one check/apply pass and exit
