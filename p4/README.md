@@ -57,6 +57,14 @@ build/ucs_edge_cluster_route.p4info.txt   已编译 P4Info
   --topology ./topology/wifi_adhoc_matrix_2x3_6uav.json
 ```
 
+批量更新关键目标，避免每个目标单独启动一次 P4Runtime loader：
+
+```bash
+./p4/apply_adaptive_routes.sh \
+  --topology ./topology/wifi_adhoc_matrix_2x3_6uav.json \
+  --targets gs,uav03,uav01
+```
+
 跟随运行时链路状态自动重算：
 
 ```bash

@@ -45,6 +45,7 @@ Options:
   --bmv2-json FILE      Override compiled BMv2 JSON path
   --p4info FILE         Override P4Info text path
   --target ID           Load only one UAV id or container name
+  --targets CSV         Load a comma-separated set of UAV ids/container names
   --include-gs          Also load the host-side GS BMv2 edge target
   --gs-app-if IFACE     Host GS app-facing interface for route MACs. Default: topology gs_edge.app_if or gs0
   --gs-device-id ID     P4Runtime device id for the GS edge. Default: 100
@@ -104,6 +105,11 @@ while [[ $# -gt 0 ]]; do
     --target)
       TARGET_FILTER="${2:-}"
       [[ -n "$TARGET_FILTER" ]] || die "--target requires a UAV id or container name"
+      shift 2
+      ;;
+    --targets)
+      TARGET_FILTER="${2:-}"
+      [[ -n "$TARGET_FILTER" ]] || die "--targets requires a CSV value"
       shift 2
       ;;
     --include-gs)
@@ -226,9 +232,10 @@ repo_rel_path() {
 TOPOLOGY_FILE="$(resolve_repo_path "$TOPOLOGY_FILE")"
 [[ -f "$TOPOLOGY_FILE" ]] || die "topology file not found: $TOPOLOGY_FILE"
 
+BATCH_SPEC="$(mktemp /tmp/ucs_mesh_p4_batch.XXXXXX.tsv)"
 RUNTIME_SH="$(mktemp /tmp/ucs_mesh_p4_load.XXXXXX.sh)"
 cleanup_runtime_file() {
-  rm -f "$RUNTIME_SH"
+  rm -f "$RUNTIME_SH" "$BATCH_SPEC"
 }
 trap cleanup_runtime_file EXIT
 
@@ -239,6 +246,7 @@ import shlex
 import sys
 
 topology_file, target_filter, include_gs_raw, gs_device_id_raw, gs_grpc_addr = sys.argv[1:]
+target_filters = {item.strip() for item in target_filter.split(",") if item.strip()}
 include_gs_cli = include_gs_raw == "1"
 with open(topology_file, "r", encoding="utf-8") as f:
     topo = json.load(f)
@@ -275,7 +283,7 @@ include_gs = include_gs_cli or bool(gs_edge.get("enabled", False))
 if include_gs:
     gs_device_id = int(gs_edge.get("device_id", gs_device_id_raw))
     gs_grpc_addr = str(gs_edge.get("grpc_addr", gs_grpc_addr))
-    if not target_filter or target_filter == gs_id:
+    if not target_filters or gs_id in target_filters:
         targets.append((gs_id, gs_id, gs_device_id, gs_grpc_addr, "host"))
 
 for inst in topo.get("instances", []):
@@ -290,7 +298,7 @@ for inst in topo.get("instances", []):
         p4_cfg = {}
     uav_id = str(inst.get("id"))
     container = str(inst.get("container_name", uav_id))
-    if target_filter and target_filter not in {uav_id, container}:
+    if target_filters and target_filters.isdisjoint({uav_id, container}):
         continue
     idx = int(inst.get("idx", "".join(ch for ch in uav_id if ch.isdigit()) or "0"))
     device_id = int(p4_cfg.get("device_id", 100 + idx))
@@ -437,38 +445,8 @@ load_one() {
     entries_in_container="/workspace/ucs/scripts/${entries_rel}"
   fi
 
-  vlog "loading ${uav_id}: kind=${target_kind} container=${container} device=${device_id} grpc=${grpc_target}"
-  docker run --rm \
-    --network host \
-    -v "${SCRIPTS_ROOT}:/workspace/ucs/scripts:ro" \
-    --entrypoint bash \
-    "$P4RUNTIME_IMAGE" \
-    -lc '
-set -Eeuo pipefail
-source /p4runtime-sh/venv/bin/activate
-extra=()
-if [[ "${6:-0}" == "1" ]]; then
-  extra+=(--verbose)
-fi
-if [[ -n "${7:-}" ]]; then
-  extra+=(--entries-json "$7")
-fi
-python3 "$1" \
-  --device-id "$2" \
-  --grpc-addr "$3" \
-  --p4info "$4" \
-  --bmv2-json "$5" \
-  "${extra[@]}"
-' _ \
-    "$LOADER_IN_CONTAINER" \
-    "$device_id" \
-    "$grpc_target" \
-    "$P4INFO_IN_CONTAINER" \
-    "$BMV2_JSON_IN_CONTAINER" \
-    "$VERBOSE" \
-    "$entries_in_container"
-
-  log "loaded ${uav_id}: device=${device_id} grpc=${grpc_target}"
+  vlog "prepared ${uav_id}: kind=${target_kind} container=${container} device=${device_id} grpc=${grpc_target}"
+  printf '%s\t%s\t%s\t%s\n' "$uav_id" "$device_id" "$grpc_target" "$entries_in_container" >>"$BATCH_SPEC"
 }
 
 log "pipeline artifacts:"
@@ -487,5 +465,35 @@ for ((i=0; i<TARGET_COUNT; ++i)); do
   eval "target_kind=\${TARGET_KIND_${i}}"
   load_one "$target_id" "$target_container" "$target_device_id" "$target_grpc_addr" "$target_kind"
 done
+
+if [[ "$DRY_RUN" -ne 1 ]]; then
+  if [[ ! -s "$BATCH_SPEC" ]]; then
+    die "no P4Runtime load targets prepared"
+  fi
+  docker run --rm \
+    --network host \
+    -v "${SCRIPTS_ROOT}:/workspace/ucs/scripts:ro" \
+    -v "${BATCH_SPEC}:/tmp/ucs_p4_batch.tsv:ro" \
+    --entrypoint bash \
+    "$P4RUNTIME_IMAGE" \
+    -lc '
+set -Eeuo pipefail
+source /p4runtime-sh/venv/bin/activate
+extra=()
+if [[ "${5:-0}" == "1" ]]; then
+  extra+=(--verbose)
+fi
+python3 "$1" \
+  --batch-tsv "$2" \
+  --p4info "$3" \
+  --bmv2-json "$4" \
+  "${extra[@]}"
+' _ \
+    "$LOADER_IN_CONTAINER" \
+    "/tmp/ucs_p4_batch.tsv" \
+    "$P4INFO_IN_CONTAINER" \
+    "$BMV2_JSON_IN_CONTAINER" \
+    "$VERBOSE"
+fi
 
 log "done"

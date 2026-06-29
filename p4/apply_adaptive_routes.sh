@@ -22,6 +22,7 @@ Usage:
 Options:
   --topology FILE       Topology JSON file
   --target ID           Load only one UAV id or gs
+  --targets CSV         Load a comma-separated set of UAV ids or gs
   --routing-mode MODE   Route entry mode. Default: adaptive_resource
   --routing-metrics-max-age-sec SEC
                         Max age for live routing metrics. Default: 15
@@ -56,6 +57,11 @@ while [[ $# -gt 0 ]]; do
       [[ -n "$TARGET_FILTER" ]] || { echo "[p4-adaptive][ERR] --target requires an id" >&2; exit 1; }
       shift 2
       ;;
+    --targets)
+      TARGET_FILTER="${2:-}"
+      [[ -n "$TARGET_FILTER" ]] || { echo "[p4-adaptive][ERR] --targets requires a CSV value" >&2; exit 1; }
+      shift 2
+      ;;
     --verbose)
       VERBOSE=1
       shift
@@ -88,7 +94,11 @@ args=(
 )
 
 if [[ -n "$TARGET_FILTER" ]]; then
-  args+=(--target "$TARGET_FILTER")
+  if [[ "$TARGET_FILTER" == *,* ]]; then
+    args+=(--targets "$TARGET_FILTER")
+  else
+    args+=(--target "$TARGET_FILTER")
+  fi
 fi
 
 if [[ "$VERBOSE" -eq 1 ]]; then

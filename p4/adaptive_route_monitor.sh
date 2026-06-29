@@ -134,13 +134,12 @@ sys.exit(0 if relevant(sys.argv[1]) == relevant(sys.argv[2]) else 1)
 PY
 }
 
-check_one() {
+target_changed() {
   local target="$1"
   local entries_dir="${MESH_DIR}/p4/build/p4runtime_entries"
   local current="${entries_dir}/${target}.json"
   local tmp
   tmp="$(mktemp "/tmp/ucs_${target}_route.XXXXXX.json")"
-  trap 'rm -f "$tmp"' RETURN
 
   "$PYTHON_BIN" "${MESH_DIR}/p4/cluster_head_entries.py" \
     --topology "$TOPOLOGY_FILE" \
@@ -151,18 +150,31 @@ check_one() {
     --cluster-heads "$CLUSTER_HEADS" \
     --gs-app-if "$GS_APP_IF" >/tmp/ucs_route_monitor_generate.log 2>&1 || {
       cat /tmp/ucs_route_monitor_generate.log >&2 || true
-      return 1
+      rm -f "$tmp"
+      return 2
     }
 
   if [[ -f "$current" ]] && entries_changed "$current" "$tmp"; then
     [[ "$VERBOSE" -eq 1 ]] && echo "[p4-route-monitor] unchanged target=${target}"
-    return 0
+    rm -f "$tmp"
+    return 1
   fi
 
-  echo "[p4-route-monitor] changed target=${target}; applying"
+  rm -f "$tmp"
+  return 0
+}
+
+join_csv() {
+  local IFS=,
+  echo "$*"
+}
+
+apply_targets() {
+  local targets_csv="$1"
+  echo "[p4-route-monitor] changed targets=${targets_csv}; applying"
   "${SCRIPT_DIR}/apply_adaptive_routes.sh" \
     --topology "$TOPOLOGY_FILE" \
-    --target "$target" \
+    --targets "$targets_csv" \
     --routing-mode "$ROUTING_MODE" \
     --routing-metrics-max-age-sec "$ROUTING_METRICS_MAX_AGE_SEC"
 }
@@ -170,10 +182,22 @@ check_one() {
 echo "[p4-route-monitor] topology=${TOPOLOGY_FILE} mode=${ROUTING_MODE} interval=${INTERVAL_SEC}s metrics_max_age=${ROUTING_METRICS_MAX_AGE_SEC}s"
 
 while true; do
+  changed_targets=()
   while IFS= read -r target; do
     [[ -n "$target" ]] || continue
-    check_one "$target"
+    if target_changed "$target"; then
+      changed_targets+=("$target")
+    else
+      rc=$?
+      if [[ "$rc" -gt 1 ]]; then
+        exit "$rc"
+      fi
+    fi
   done < <(targets)
+
+  if [[ "${#changed_targets[@]}" -gt 0 ]]; then
+    apply_targets "$(join_csv "${changed_targets[@]}")"
+  fi
 
   if [[ "$ONCE" -eq 1 ]]; then
     exit 0
