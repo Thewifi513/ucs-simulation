@@ -875,10 +875,13 @@ start_host_gs_bmv2() {
   [[ "$GS_BMV2_ENABLED" == "1" ]] || return 0
 
   docker rm -f "$GS_BMV2_CONTAINER" >/dev/null 2>&1 || true
+  local docker_cpuset_args=()
+  mapfile -t docker_cpuset_args < <(ucs_docker_cpuset_args GS_BMV2 0)
   docker run -d --rm \
     --name "$GS_BMV2_CONTAINER" \
     --network host \
     --privileged \
+    "${docker_cpuset_args[@]}" \
     --entrypoint bash \
     "$GS_BMV2_IMAGE" \
     -lc "exec simple_switch_grpc \
@@ -1025,11 +1028,14 @@ start_container_bmv2() {
   local grpc_addr="$4"
   local pid_file
   local log_file
+  local endpoint_idx
 
   [[ "$EDGE_DATAPLANE" == "container_bmv2_inline" ]] || return 0
 
   pid_file="$(container_bmv2_pidfile "$endpoint")"
   log_file="$(container_bmv2_logfile "$endpoint")"
+  endpoint_idx="${endpoint//[!0-9]/}"
+  ucs_docker_update_cpuset "$container" UAV "$endpoint_idx" 2>/dev/null || true
 
   docker exec "$container" bash -lc "
 set -Eeuo pipefail

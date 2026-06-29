@@ -545,11 +545,14 @@ case "$HELPER_BACKEND" in
     WORKER_CMD=("$PYTHON_BIN" "$WORKER_PY" --runtime-file "$RUNTIME_FILE")
     ;;
   docker)
+    docker_cpuset_args=()
+    mapfile -t docker_cpuset_args < <(ucs_docker_cpuset_args METRICS 0)
     WORKER_CMD=(
       docker run --rm
       --name "$METRICS_CONTAINER"
       --network host
       --user "$(id -u):$(id -g)"
+      "${docker_cpuset_args[@]}"
       -v "${MESH_DIR}:${MESH_DIR}:ro"
       -v /tmp:/tmp
       -v /dev/shm:/dev/shm
@@ -563,6 +566,13 @@ case "$HELPER_BACKEND" in
 esac
 if [[ "$VERBOSE" -eq 1 ]]; then
   WORKER_CMD+=(--verbose)
+fi
+WORKER_RUN_CMD=("${WORKER_CMD[@]}")
+if [[ "$HELPER_BACKEND" == "host" ]]; then
+  WORKER_CPUSET="$(ucs_cpu_set METRICS 0 2>/dev/null || true)"
+  if [[ -n "$WORKER_CPUSET" ]]; then
+    WORKER_RUN_CMD=(taskset -c "$WORKER_CPUSET" "${WORKER_RUN_CMD[@]}")
+  fi
 fi
 
 cleanup() {
@@ -584,16 +594,16 @@ if [[ "$FOREGROUND" -eq 1 ]]; then
   trap cleanup INT TERM EXIT
 
   echo "[metrics_up] starting worker in foreground ..."
-  "${WORKER_CMD[@]}" &
+  "${WORKER_RUN_CMD[@]}" &
   WORKER_PID=$!
   echo "$WORKER_PID" > "$PIDFILE"
   wait "$WORKER_PID"
 else
   echo "[metrics_up] starting worker in background ..."
   if command -v setsid >/dev/null 2>&1; then
-    setsid "${WORKER_CMD[@]}" >>"$LOGFILE" 2>&1 < /dev/null &
+    setsid "${WORKER_RUN_CMD[@]}" >>"$LOGFILE" 2>&1 < /dev/null &
   else
-    "${WORKER_CMD[@]}" >>"$LOGFILE" 2>&1 < /dev/null &
+    "${WORKER_RUN_CMD[@]}" >>"$LOGFILE" 2>&1 < /dev/null &
   fi
   WORKER_PID=$!
   echo "$WORKER_PID" > "$PIDFILE"

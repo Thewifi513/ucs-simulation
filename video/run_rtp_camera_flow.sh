@@ -468,6 +468,7 @@ start_stream() {
   case "$HELPER_BACKEND" in
     host)
       bridge_cmd=(
+        ucs_maybe_taskset VIDEO 0
         "${nsenter_cmd[@]}"
         env "GZ_PARTITION=${gz_partition}" "GZ_IP=${gz_ip}"
         "$PYTHON_BIN" "$BRIDGE_PY"
@@ -479,11 +480,14 @@ start_stream() {
       docker rm -f "$helper_container" >/dev/null 2>&1 || true
       local gpu_args=()
       mapfile -t gpu_args < <(docker_gpu_args)
+      local docker_cpuset_args=()
+      mapfile -t docker_cpuset_args < <(ucs_docker_cpuset_args VIDEO 0)
       bridge_cmd=(
         docker run --rm
         --name "$helper_container"
         --network "container:${container}"
         --user "$(id -u):$(id -g)"
+        "${docker_cpuset_args[@]}"
         -v "${MESH_DIR}:${MESH_DIR}:ro"
         -e "GZ_PARTITION=${gz_partition}"
         -e "GZ_IP=${gz_ip}"

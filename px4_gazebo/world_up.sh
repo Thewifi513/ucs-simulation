@@ -621,6 +621,8 @@ PY
         ;;
     esac
 
+    docker_cpuset_args=()
+    mapfile -t docker_cpuset_args < <(ucs_docker_cpuset_args GAZEBO 0)
     echo "[A] Starting gz sim HEADLESS in Docker: image=${UCS_GAZEBO_IMAGE} container=${WORLD_DOCKER_CONTAINER}"
     echo "[A] Docker network=host GZ_PARTITION=$GZ_PARTITION GZ_IP=$GZ_IP"
     set +e
@@ -631,6 +633,7 @@ PY
       "${docker_gpu_args[@]}" \
       "${docker_gpu_env_args[@]}" \
       "${docker_extra_args[@]}" \
+      "${docker_cpuset_args[@]}" \
       "${docker_mount_args[@]}" \
       "${docker_gpu_mount_args[@]}" \
       "${docker_host_lib_args[@]}" \
@@ -650,7 +653,7 @@ PY
   else
     echo "[A] Starting gz sim HEADLESS (server-only): setsid gz sim -s -r --headless-rendering --render-engine-server $HEADLESS_RENDER_ENGINE $WORLD_SDF"
     set +e
-    setsid gz sim -s -r --headless-rendering --render-engine-server "$HEADLESS_RENDER_ENGINE" "$WORLD_SDF" &
+    ucs_maybe_taskset GAZEBO 0 setsid gz sim -s -r --headless-rendering --render-engine-server "$HEADLESS_RENDER_ENGINE" "$WORLD_SDF" &
     gz_pid=$!
     if [[ -n "${PID_DIR:-}" ]]; then
       printf '%s\n' "$gz_pid" > "${PID_DIR}/world-A.pid"

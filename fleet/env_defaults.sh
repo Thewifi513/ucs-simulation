@@ -137,6 +137,172 @@ ucs_docker_gpu_args() {
   esac
 }
 
+ucs_cpu_count() {
+  nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1\n'
+}
+
+ucs_cpu_affinity_enabled() {
+  local mode="${UCS_MESH_CPU_AFFINITY:-auto}"
+  case "$mode" in
+    0|false|False|FALSE|no|No|NO|off|Off|OFF)
+      return 1
+      ;;
+    1|true|True|TRUE|yes|Yes|YES|on|On|ON)
+      command -v taskset >/dev/null 2>&1
+      return $?
+      ;;
+    auto|"")
+      command -v taskset >/dev/null 2>&1 || return 1
+      [[ "$(ucs_cpu_count)" -ge 64 ]]
+      ;;
+    *)
+      echo "[env_defaults][ERR] unsupported UCS_MESH_CPU_AFFINITY=${mode}" >&2
+      return 1
+      ;;
+  esac
+}
+
+ucs_cpu_affinity_forced_off() {
+  local mode="${UCS_MESH_CPU_AFFINITY:-auto}"
+  case "$mode" in
+    0|false|False|FALSE|no|No|NO|off|Off|OFF)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+ucs_default_uav_cpuset_64() {
+  local idx="$1"
+  case "$idx" in
+    1|01) printf '%s\n' "20-21,52-53" ;;
+    2|02) printf '%s\n' "22-23,54-55" ;;
+    3|03) printf '%s\n' "24-25,56-57" ;;
+    4|04) printf '%s\n' "26-27,58-59" ;;
+    5|05) printf '%s\n' "28-29,60-61" ;;
+    6|06) printf '%s\n' "30-31,62-63" ;;
+    *) printf '%s\n' "20-31,52-63" ;;
+  esac
+}
+
+ucs_default_uav_cpuset_32() {
+  local idx="$1"
+  case "$idx" in
+    1|01) printf '%s\n' "16-17" ;;
+    2|02) printf '%s\n' "18-19" ;;
+    3|03) printf '%s\n' "20-21" ;;
+    4|04) printf '%s\n' "22-23" ;;
+    5|05) printf '%s\n' "24-25" ;;
+    6|06) printf '%s\n' "26-27" ;;
+    *) printf '%s\n' "16-31" ;;
+  esac
+}
+
+ucs_default_cpuset() {
+  local role="$1"
+  local idx="${2:-}"
+  local cpus
+  cpus="$(ucs_cpu_count)"
+
+  if [[ "$cpus" -ge 64 ]]; then
+    case "$role" in
+      GAZEBO) printf '%s\n' "${UCS_CPU_GAZEBO_SET:-0-11,32-43}" ;;
+      NS3) printf '%s\n' "${UCS_CPU_NS3_SET:-12-13,44-45}" ;;
+      GS_BMV2) printf '%s\n' "${UCS_CPU_GS_BMV2_SET:-14-15,46-47}" ;;
+      VIDEO) printf '%s\n' "${UCS_CPU_VIDEO_SET:-16-19,48-51}" ;;
+      METRICS) printf '%s\n' "${UCS_CPU_METRICS_SET:-18-19,50-51}" ;;
+      DASHBOARD) printf '%s\n' "${UCS_CPU_DASHBOARD_SET:-18,50}" ;;
+      CONTROL) printf '%s\n' "${UCS_CPU_CONTROL_SET:-$(ucs_default_uav_cpuset_64 "$idx")}" ;;
+      UAV|UAV_BMV2|PX4) printf '%s\n' "${UCS_CPU_UAV_SET:-$(ucs_default_uav_cpuset_64 "$idx")}" ;;
+      *) return 1 ;;
+    esac
+    return 0
+  fi
+
+  if [[ "$cpus" -ge 32 ]]; then
+    case "$role" in
+      GAZEBO) printf '%s\n' "${UCS_CPU_GAZEBO_SET:-0-7}" ;;
+      NS3) printf '%s\n' "${UCS_CPU_NS3_SET:-8-9}" ;;
+      GS_BMV2) printf '%s\n' "${UCS_CPU_GS_BMV2_SET:-10-11}" ;;
+      VIDEO) printf '%s\n' "${UCS_CPU_VIDEO_SET:-12-15}" ;;
+      METRICS) printf '%s\n' "${UCS_CPU_METRICS_SET:-14-15}" ;;
+      DASHBOARD) printf '%s\n' "${UCS_CPU_DASHBOARD_SET:-14}" ;;
+      CONTROL) printf '%s\n' "${UCS_CPU_CONTROL_SET:-$(ucs_default_uav_cpuset_32 "$idx")}" ;;
+      UAV|UAV_BMV2|PX4) printf '%s\n' "${UCS_CPU_UAV_SET:-$(ucs_default_uav_cpuset_32 "$idx")}" ;;
+      *) return 1 ;;
+    esac
+    return 0
+  fi
+
+  return 1
+}
+
+ucs_cpu_set() {
+  local role="$1"
+  local idx="${2:-}"
+  local role_var="UCS_CPU_${role}_SET"
+  local idx_var=""
+  local idx_norm=""
+
+  ucs_cpu_affinity_forced_off && return 1
+
+  if [[ "$role" == "UAV" || "$role" == "UAV_BMV2" || "$role" == "PX4" || "$role" == "CONTROL" ]]; then
+    if [[ "$idx" =~ ^[0-9]+$ ]]; then
+      idx_norm="$(printf '%02d' "$((10#$idx))")"
+    else
+      idx_norm="$idx"
+    fi
+    idx_var="UCS_CPU_UAV${idx_norm}_SET"
+    if [[ -n "$idx_var" && -n "${!idx_var:-}" ]]; then
+      printf '%s\n' "${!idx_var}"
+      return 0
+    fi
+  fi
+
+  if [[ -n "${!role_var:-}" ]]; then
+    printf '%s\n' "${!role_var}"
+    return 0
+  fi
+
+  ucs_cpu_affinity_enabled || return 1
+  ucs_default_cpuset "$role" "$idx"
+}
+
+ucs_maybe_taskset() {
+  local role="$1"
+  local idx="${2:-}"
+  shift 2 || true
+  local cpuset=""
+  cpuset="$(ucs_cpu_set "$role" "$idx" 2>/dev/null || true)"
+  if [[ -n "$cpuset" && -n "${1:-}" ]]; then
+    taskset -c "$cpuset" "$@"
+  else
+    "$@"
+  fi
+}
+
+ucs_docker_cpuset_args() {
+  local role="$1"
+  local idx="${2:-}"
+  local cpuset=""
+  cpuset="$(ucs_cpu_set "$role" "$idx" 2>/dev/null || true)"
+  if [[ -n "$cpuset" ]]; then
+    printf '%s\n' "--cpuset-cpus" "$cpuset"
+  fi
+}
+
+ucs_docker_update_cpuset() {
+  local container="$1"
+  local role="$2"
+  local idx="${3:-}"
+  local cpuset=""
+  cpuset="$(ucs_cpu_set "$role" "$idx" 2>/dev/null || true)"
+  [[ -n "$cpuset" ]] || return 0
+  docker update --cpuset-cpus "$cpuset" "$container" >/dev/null
+}
+
 export UCS_MESH_DIR UCS_SCRIPTS_ROOT UCS_ROOT UCS_WORKSPACE_ROOT
 export PX4_DIR NS3_DIR GZ_ENV_SH PX4_GZ_MODELS PX4_GZ_WORLDS
 export UCS_VENV_DIR PYTHON_BIN

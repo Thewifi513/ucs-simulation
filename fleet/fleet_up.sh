@@ -846,15 +846,31 @@ start_session_logged() {
   printf '%s\n' "$!"
 }
 
+with_taskset_cmd() {
+  local role="$1"
+  local idx="$2"
+  local out_name="$3"
+  shift 3
+  local cpuset=""
+  local -n out_ref="$out_name"
+
+  out_ref=("$@")
+  cpuset="$(ucs_cpu_set "$role" "$idx" 2>/dev/null || true)"
+  if [[ -n "$cpuset" ]]; then
+    out_ref=(taskset -c "$cpuset" "${out_ref[@]}")
+  fi
+}
+
 start_control() {
   if ! control_should_start; then
     log "control = skipped (mode=${CONTROL_MODE}, topology_control=${TOPOLOGY_CONTROL_ENABLED})"
     return 0
   fi
 
-  local target relay_port core_port mavsdk_port log_file
+  local target target_idx relay_port core_port mavsdk_port log_file
   while IFS= read -r target; do
     [[ -n "$target" ]] || continue
+    target_idx="$(uav_idx_from_id "$target")" || return 1
     relay_port="$(control_relay_port_for "$target")" || return 1
     core_port="$(control_core_port_for "$target")" || return 1
     mavsdk_port="$(control_mavsdk_server_port_for "$target")" || return 1
@@ -872,14 +888,16 @@ start_control() {
     rm -f "$log_file"
     log "launching browser control backend for ${target} ..."
     log "control log = ${log_file}"
-    if ! "$CONTROL_UP_SH" \
+    local control_cmd=()
+    with_taskset_cmd CONTROL "$target_idx" control_cmd \
+      "$CONTROL_UP_SH" \
         --topology "$TOPOLOGY_FILE" \
         --uav "$target" \
         --core-port "$core_port" \
         --relay-port "$relay_port" \
         --mavsdk-server-port "$mavsdk_port" \
-        --bg \
-        >"$log_file" 2>&1; then
+        --bg
+    if ! "${control_cmd[@]}" >"$log_file" 2>&1; then
       echo "[mesh_up][ERR] control backend failed for ${target}; check log: ${log_file}" >&2
       sed -n '1,160p' "$log_file" >&2 || true
       return 1
@@ -926,14 +944,16 @@ start_video_flow() {
     override_args+=(--fps "$VIDEO_FPS")
   fi
   local rtp_pid
-  rtp_pid="$(start_session_logged "$RTP_LOGFILE" \
+  local rtp_cmd=()
+  with_taskset_cmd VIDEO 0 rtp_cmd \
     env RTP_RUN_DIR="$RTP_RUN_DIR" \
     "$RTP_CAMERA_FLOW_SH" \
       --topology "$TOPOLOGY_FILE" \
       --all \
       "${flow_args[@]}" \
       "${override_args[@]}" \
-      --encoder "$VIDEO_ENCODER")"
+      --encoder "$VIDEO_ENCODER"
+  rtp_pid="$(start_session_logged "$RTP_LOGFILE" "${rtp_cmd[@]}")"
   printf '%s\n' "$rtp_pid" > "$RTP_PIDFILE"
   sleep 0.5
   if ! kill -0 "$rtp_pid" 2>/dev/null; then
@@ -1003,9 +1023,11 @@ start_dashboard() {
       --video-sender-run-dir "${RTP_RUN_DIR}/on-demand"
     )
   fi
+  local dashboard_cmd=()
+  with_taskset_cmd DASHBOARD 0 dashboard_cmd "${dashboard_args[@]}"
   local dashboard_pid
   dashboard_pid="$(start_detached_logged "$DASHBOARD_LOGFILE" \
-    "${dashboard_args[@]}")"
+    "${dashboard_cmd[@]}")"
   printf '%s\n' "$dashboard_pid" > "$DASHBOARD_PIDFILE"
   sleep 0.5
   if ! kill -0 "$dashboard_pid" 2>/dev/null; then
@@ -1039,6 +1061,11 @@ else
   log "control  = ${CONTROL_MODE} (topology_enabled=${TOPOLOGY_CONTROL_ENABLED}, target=${CONTROL_UAV}, ws=${CONTROL_RELAY_PORT}, core=${CONTROL_CORE_PORT})"
 fi
 log "dashboard = ${DASHBOARD_MODE} (host=${DASHBOARD_HOST}, port=${DASHBOARD_PORT})"
+if ucs_cpu_affinity_enabled; then
+  log "cpu affinity = on (gazebo=$(ucs_cpu_set GAZEBO 0), ns3=$(ucs_cpu_set NS3 0), gs_bmv2=$(ucs_cpu_set GS_BMV2 0), video=$(ucs_cpu_set VIDEO 0), uav01=$(ucs_cpu_set UAV 1))"
+else
+  log "cpu affinity = off"
+fi
 
 if [[ -f "$NS3_PIDFILE" ]]; then
   OLD_PID="$(cat "$NS3_PIDFILE" 2>/dev/null || true)"
@@ -1055,6 +1082,15 @@ request_sudo_once
 log "ensuring containers ..."
 for idx in "${IDXS[@]}"; do
   "$ENSURE_CONTAINER_SH" --topology "$TOPOLOGY_FILE" --idx "$idx"
+  uav_container="$(uav_id_for_idx "$idx")"
+  uav_cpuset="$(ucs_cpu_set UAV "$idx" 2>/dev/null || true)"
+  if [[ -n "$uav_cpuset" ]]; then
+    if ucs_docker_update_cpuset "$uav_container" UAV "$idx" 2>/dev/null; then
+      log "cpu affinity container ${uav_container} = ${uav_cpuset}"
+    else
+      log "cpu affinity container ${uav_container} = skipped (docker update failed)"
+    fi
+  fi
 done
 
 log "launching world helper ..."
@@ -1066,9 +1102,12 @@ if [[ "$TERMINAL_MODE" == "full" ]]; then
   WORLD_CMD="PID_DIR='$PID_DIR' UCS_GZ_GUI='$WORLD_GUI' '$WORLD_UP_SH' --topology '$TOPOLOGY_FILE' '$WORLD_VISUAL_ARG'"
   open_terminal_hold "mesh-world" "$WORLD_CMD" "${PID_DIR}/world-launcher.pid"
 else
-  run_logged "world launcher" "${PID_DIR}/world-launcher.log" \
+  world_cmd=()
+  with_taskset_cmd GAZEBO 0 world_cmd \
     env PID_DIR="$PID_DIR" UCS_GZ_GUI="$WORLD_GUI" UCS_MESH_NO_TERMINALS=1 \
     "$WORLD_UP_SH" --topology "$TOPOLOGY_FILE" "$WORLD_VISUAL_ARG" --no-terminal
+  run_logged "world launcher" "${PID_DIR}/world-launcher.log" \
+    "${world_cmd[@]}"
 fi
 
 sleep 0.8
@@ -1080,9 +1119,12 @@ for idx in "${IDXS[@]}"; do
     PX4_CMD="PID_DIR='$PID_DIR' '$PX4_UP_SH' --topology '$TOPOLOGY_FILE' --idx '$idx'"
     open_terminal_hold "mesh-px4-uav${uav_num}" "$PX4_CMD" "${PID_DIR}/px4-uav${uav_num}-launcher.pid"
   else
-    run_logged "px4 launcher uav${uav_num}" "${PID_DIR}/px4-uav${uav_num}-launcher.log" \
+    px4_cmd=()
+    with_taskset_cmd PX4 "$idx" px4_cmd \
       env PID_DIR="$PID_DIR" UCS_MESH_NO_TERMINALS=1 \
       "$PX4_UP_SH" --topology "$TOPOLOGY_FILE" --idx "$idx" --no-terminal
+    run_logged "px4 launcher uav${uav_num}" "${PID_DIR}/px4-uav${uav_num}-launcher.log" \
+      "${px4_cmd[@]}"
   fi
   sleep 0.5
 done
@@ -1093,7 +1135,9 @@ log "launching metrics helper before ns-3 ..."
 rm -f "$METRICS_RUNTIME_JSON" "$METRICS_LOGFILE" "$METRICS_PIDFILE"
 METRICS_CMD=("$METRICS_UP_SH" "--topology" "$TOPOLOGY_FILE" "--bg")
 [[ "$VERBOSE" -eq 1 ]] && METRICS_CMD+=("--verbose")
-nohup "${METRICS_CMD[@]}" >"$METRICS_LOGFILE" 2>&1 &
+metrics_cmd=()
+with_taskset_cmd METRICS 0 metrics_cmd "${METRICS_CMD[@]}"
+nohup "${metrics_cmd[@]}" >"$METRICS_LOGFILE" 2>&1 &
 METRICS_UP_PID="$!"
 printf '%s\n' "$METRICS_UP_PID" > "${PID_DIR}/metrics-launcher.pid"
 
@@ -1114,8 +1158,10 @@ case "$BMV2_MODE" in
     NET_ENV+=(UCS_MESH_DISABLE_BMV2=0 UCS_MESH_EDGE_DATAPLANE=container_bmv2_inline)
     ;;
 esac
+net_cmd=()
+with_taskset_cmd NS3 0 net_cmd env "${NET_ENV[@]}" "${NET_CMD[@]}"
 NET_UP_PID="$(start_detached_logged "$NS3_LOGFILE" \
-  env "${NET_ENV[@]}" "${NET_CMD[@]}")"
+  "${net_cmd[@]}")"
 printf '%s\n' "$NET_UP_PID" > "$NS3_PIDFILE"
 printf '%s\n' "$NET_UP_PID" > "${PID_DIR}/ns3.pid"
 if [[ "$TERMINAL_MODE" == "full" ]]; then
