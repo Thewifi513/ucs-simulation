@@ -10,7 +10,7 @@ DEFAULT_TOPOLOGY="${MESH_DIR}/topology/wifi_adhoc_matrix_2x3_6uav.json"
 TOPOLOGY_FILE="${TOPOLOGY_FILE:-$DEFAULT_TOPOLOGY}"
 ROUTING_MODE="${UCS_MESH_ROUTING_MODE:-adaptive_resource}"
 ROUTING_METRICS_MAX_AGE_SEC="${UCS_MESH_ROUTING_METRICS_MAX_AGE_SEC:-15}"
-INTERVAL_SEC="${UCS_MESH_ADAPTIVE_ROUTE_INTERVAL_SEC:-1}"
+INTERVAL_SEC="${UCS_MESH_ADAPTIVE_ROUTE_INTERVAL_SEC:-0.5}"
 TARGETS_CSV="${UCS_MESH_ADAPTIVE_ROUTE_TARGETS:-}"
 CLUSTER_HEADS="${UCS_MESH_CLUSTER_HEADS:-}"
 GS_APP_IF="${UCS_MESH_GS_APP_IF:-gs0}"
@@ -25,7 +25,7 @@ Usage:
 Options:
   --topology FILE       Topology JSON file
   --targets CSV         Targets to watch, e.g. gs,uav05. Default: gs plus all UAVs
-  --interval-sec SEC    Recompute interval. Default: 1
+  --interval-sec SEC    Recompute interval. Default: 0.5
   --routing-mode MODE   Route entry mode. Default: adaptive_resource
   --routing-metrics-max-age-sec SEC
                         Max age for live routing metrics. Default: 15
@@ -134,34 +134,17 @@ sys.exit(0 if relevant(sys.argv[1]) == relevant(sys.argv[2]) else 1)
 PY
 }
 
-target_changed() {
-  local target="$1"
-  local entries_dir="${MESH_DIR}/p4/build/p4runtime_entries"
-  local current="${entries_dir}/${target}.json"
-  local tmp
-  tmp="$(mktemp "/tmp/ucs_${target}_route.XXXXXX.json")"
-
+generate_targets() {
+  local targets_csv="$1"
+  local output_dir="$2"
   "$PYTHON_BIN" "${MESH_DIR}/p4/cluster_head_entries.py" \
     --topology "$TOPOLOGY_FILE" \
-    --target-id "$target" \
-    --output "$tmp" \
+    --targets "$targets_csv" \
+    --output-dir "$output_dir" \
     --routing-mode "$ROUTING_MODE" \
     --metrics-max-age-sec "$ROUTING_METRICS_MAX_AGE_SEC" \
     --cluster-heads "$CLUSTER_HEADS" \
-    --gs-app-if "$GS_APP_IF" >/tmp/ucs_route_monitor_generate.log 2>&1 || {
-      cat /tmp/ucs_route_monitor_generate.log >&2 || true
-      rm -f "$tmp"
-      return 2
-    }
-
-  if [[ -f "$current" ]] && entries_changed "$current" "$tmp"; then
-    [[ "$VERBOSE" -eq 1 ]] && echo "[p4-route-monitor] unchanged target=${target}"
-    rm -f "$tmp"
-    return 1
-  fi
-
-  rm -f "$tmp"
-  return 0
+    --gs-app-if "$GS_APP_IF"
 }
 
 join_csv() {
@@ -183,17 +166,40 @@ echo "[p4-route-monitor] topology=${TOPOLOGY_FILE} mode=${ROUTING_MODE} interval
 
 while true; do
   changed_targets=()
+  watched_targets=()
   while IFS= read -r target; do
     [[ -n "$target" ]] || continue
-    if target_changed "$target"; then
-      changed_targets+=("$target")
-    else
-      rc=$?
-      if [[ "$rc" -gt 1 ]]; then
-        exit "$rc"
-      fi
-    fi
+    watched_targets+=("$target")
   done < <(targets)
+
+  if [[ "${#watched_targets[@]}" -eq 0 ]]; then
+    die "no route monitor targets resolved"
+  fi
+
+  targets_csv="$(join_csv "${watched_targets[@]}")"
+  tmp_dir="$(mktemp -d "/tmp/ucs_route_monitor.XXXXXX")"
+  generate_targets "$targets_csv" "$tmp_dir" >/tmp/ucs_route_monitor_generate.log 2>&1 || {
+    cat /tmp/ucs_route_monitor_generate.log >&2 || true
+    rm -rf -- "$tmp_dir"
+    exit 2
+  }
+
+  entries_dir="${MESH_DIR}/p4/build/p4runtime_entries"
+  for target in "${watched_targets[@]}"; do
+    current="${entries_dir}/${target}.json"
+    tmp="${tmp_dir}/${target}.json"
+    if [[ ! -f "$tmp" ]]; then
+      echo "[p4-route-monitor][ERR] generated entries missing for target=${target}: ${tmp}" >&2
+      rm -rf -- "$tmp_dir"
+      exit 2
+    fi
+    if [[ -f "$current" ]] && entries_changed "$current" "$tmp"; then
+      [[ "$VERBOSE" -eq 1 ]] && echo "[p4-route-monitor] unchanged target=${target}"
+    else
+      changed_targets+=("$target")
+    fi
+  done
+  rm -rf -- "$tmp_dir"
 
   if [[ "${#changed_targets[@]}" -gt 0 ]]; then
     apply_targets "$(join_csv "${changed_targets[@]}")"

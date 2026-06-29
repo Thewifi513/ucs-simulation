@@ -1002,8 +1002,11 @@ def main() -> int:
         description="Generate BMv2 edge routing table entries"
     )
     parser.add_argument("--topology", required=True)
-    parser.add_argument("--target-id", required=True)
-    parser.add_argument("--output", required=True)
+    target_group = parser.add_mutually_exclusive_group(required=True)
+    target_group.add_argument("--target-id")
+    target_group.add_argument("--targets", help="Comma-separated target ids to generate")
+    parser.add_argument("--output")
+    parser.add_argument("--output-dir")
     parser.add_argument("--routing-mode", default="")
     parser.add_argument("--cluster-heads", default="")
     parser.add_argument("--gs-id", default="")
@@ -1054,63 +1057,75 @@ def main() -> int:
         endpoint_ip[uav_id] = cidr_ip(str(inst["exp_ip"]))
         endpoint_cluster[uav_id] = int(inst.get("cluster_id", 1))
 
-    target = args.target_id
-    link_costs: list[dict[str, Any]] = []
-    if routing_mode == "cluster_heads":
-        entries, routes = cluster_head_route_entries(
-            target,
-            gs_id,
-            uavs,
-            by_id,
-            cluster_heads,
-            endpoint_cluster,
-            endpoint_ip,
-            endpoint_mac,
-            air_port,
-        )
-    else:
-        entries, routes, link_costs = adaptive_prior_route_entries_from_topology(
-            topo,
-            target,
-            gs_id,
-            instances,
-            uavs,
-            by_id,
-            endpoint_cluster,
-            endpoint_ip,
-            endpoint_mac,
-            air_port,
-            args.metrics_max_age_sec,
-            routing_mode,
-        )
+    link_sim = globals_.get("link_simulation", {}) if isinstance(globals_.get("link_simulation", {}), dict) else {}
+    resource_nodes = [
+        node_id
+        for node_id, profile in node_resource_profiles(topo, instances, link_sim).items()
+        if profile.get("is_resource")
+    ]
 
-    payload = {
-        "mode": routing_mode,
-        "target_id": target,
-        "cluster_heads": {str(k): v for k, v in sorted(cluster_heads.items())},
-        "air_port": air_port,
-        "routes": routes,
-        "link_costs": link_costs,
-        "metrics_max_age_sec": args.metrics_max_age_sec,
-        "resource_nodes": [
-            node_id
-            for node_id, profile in node_resource_profiles(
+    def payload_for_target(target: str) -> dict[str, Any]:
+        link_costs: list[dict[str, Any]] = []
+        if routing_mode == "cluster_heads":
+            entries, routes = cluster_head_route_entries(
+                target,
+                gs_id,
+                uavs,
+                by_id,
+                cluster_heads,
+                endpoint_cluster,
+                endpoint_ip,
+                endpoint_mac,
+                air_port,
+            )
+        else:
+            entries, routes, link_costs = adaptive_prior_route_entries_from_topology(
                 topo,
+                target,
+                gs_id,
                 instances,
-                globals_.get("link_simulation", {}) if isinstance(globals_.get("link_simulation", {}), dict) else {},
-            ).items()
-            if profile.get("is_resource")
-        ],
-        "entries": entries,
-    }
+                uavs,
+                by_id,
+                endpoint_cluster,
+                endpoint_ip,
+                endpoint_mac,
+                air_port,
+                args.metrics_max_age_sec,
+                routing_mode,
+            )
+        return {
+            "mode": routing_mode,
+            "target_id": target,
+            "cluster_heads": {str(k): v for k, v in sorted(cluster_heads.items())},
+            "air_port": air_port,
+            "routes": routes,
+            "link_costs": link_costs,
+            "metrics_max_age_sec": args.metrics_max_age_sec,
+            "resource_nodes": resource_nodes,
+            "entries": entries,
+        }
 
-    output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(
-        f"[cluster-entries] wrote {output} mode={routing_mode} "
-        f"entries={len(entries)} target={target}"
-    )
+    def write_payload(output: Path, payload: dict[str, Any]) -> None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(
+            f"[cluster-entries] wrote {output} mode={routing_mode} "
+            f"entries={len(payload.get('entries', []))} target={payload.get('target_id')}"
+        )
+
+    if args.target_id:
+        if not args.output:
+            parser.error("--output is required with --target-id")
+        write_payload(Path(args.output), payload_for_target(args.target_id))
+    else:
+        if not args.output_dir:
+            parser.error("--output-dir is required with --targets")
+        target_ids = [item.strip() for item in str(args.targets or "").split(",") if item.strip()]
+        if not target_ids:
+            parser.error("--targets must contain at least one target id")
+        output_dir = Path(args.output_dir)
+        for target in target_ids:
+            write_payload(output_dir / f"{target}.json", payload_for_target(target))
     return 0
 
 

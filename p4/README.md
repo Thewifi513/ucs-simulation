@@ -9,9 +9,9 @@ ucs_edge_cluster_route.p4                 当前 P4 源程序
 compile.sh                                使用固定 Docker 编译 P4，生成 BMv2 JSON 和 P4Info
 load_pipeline_observation.sh              通过观测网给 GS/UAV BMv2 加载 pipeline 和表项
 apply_cluster_heads.sh                    运行中更新 cluster-head 路由表项
-apply_adaptive_routes.sh                  运行中更新 adaptive_prior 路由表项
+apply_adaptive_routes.sh                  运行中更新 adaptive_prior/adaptive_resource 路由表项
 runtime_set_pipeline.py                   P4Runtime set_pipeline_config 工具
-cluster_head_entries.py                   根据拓扑生成 cluster_heads/adaptive_prior P4Runtime 表项
+cluster_head_entries.py                   根据拓扑批量生成 cluster_heads/adaptive_* P4Runtime 表项
 build/ucs_edge_cluster_route.json         已编译 BMv2 JSON
 build/ucs_edge_cluster_route.p4info.txt   已编译 P4Info
 ```
@@ -70,8 +70,10 @@ build/ucs_edge_cluster_route.p4info.txt   已编译 P4Info
 ```bash
 ./p4/adaptive_route_monitor.sh \
   --topology ./topology/wifi_adhoc_matrix_2x3_6uav.json \
-  --interval-sec 1
+  --interval-sec 0.5
 ```
+
+监控器每轮会一次性生成所有 watched targets 的候选表项，再比较 `p4/build/p4runtime_entries/*.json`，避免逐目标重复启动 Python 和查询容器 MAC。
 
 ## 运行产物
 
