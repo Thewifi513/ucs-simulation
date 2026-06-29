@@ -625,6 +625,16 @@ PY
     mapfile -t docker_cpuset_args < <(ucs_docker_cpuset_args GAZEBO 0)
     echo "[A] Starting gz sim HEADLESS in Docker: image=${UCS_GAZEBO_IMAGE} container=${WORLD_DOCKER_CONTAINER}"
     echo "[A] Docker network=host GZ_PARTITION=$GZ_PARTITION GZ_IP=$GZ_IP"
+    docker_cpuset="$(ucs_cpu_set GAZEBO 0 2>/dev/null || true)"
+    if [[ -n "$docker_cpuset" ]]; then
+      (
+        if ucs_docker_wait_update_cpuset "$WORLD_DOCKER_CONTAINER" GAZEBO 0 60 0.2; then
+          echo "[A] Docker cpuset ${WORLD_DOCKER_CONTAINER}=${docker_cpuset}"
+        else
+          echo "[A][WARN] Docker cpuset update skipped for ${WORLD_DOCKER_CONTAINER}" >&2
+        fi
+      ) &
+    fi
     set +e
     docker run --rm \
       --name "$WORLD_DOCKER_CONTAINER" \

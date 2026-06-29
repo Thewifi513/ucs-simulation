@@ -521,6 +521,17 @@ start_stream() {
   echo "[rtp-flow] ${uav_id}/${flow_label}: container=${container} pid=${container_pid} exp_if=${exp_if} GZ_IP=${gz_ip}"
   if [[ -n "$helper_container" ]]; then
     echo "[rtp-flow] ${uav_id}/${flow_label}: helper_container=${helper_container} network=container:${container} gpu=${GZ_HELPER_DOCKER_GPU}"
+    local video_cpuset
+    video_cpuset="$(ucs_cpu_set VIDEO 0 2>/dev/null || true)"
+    if [[ -n "$video_cpuset" ]]; then
+      (
+        if ucs_docker_wait_update_cpuset "$helper_container" VIDEO 0 30 0.2; then
+          echo "[rtp-flow] ${uav_id}/${flow_label}: helper_container_cpuset=${video_cpuset}"
+        else
+          echo "[rtp-flow][WARN] ${uav_id}/${flow_label}: helper_container_cpuset_update_skipped" >&2
+        fi
+      ) &
+    fi
   fi
 
   if [[ "${#STREAM_LINES[@]}" -eq 1 ]]; then

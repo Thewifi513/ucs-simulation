@@ -590,6 +590,18 @@ cleanup() {
   exit $rc
 }
 
+apply_metrics_cpuset() {
+  [[ "$HELPER_BACKEND" == "docker" ]] || return 0
+  local metrics_cpuset
+  metrics_cpuset="$(ucs_cpu_set METRICS 0 2>/dev/null || true)"
+  [[ -n "$metrics_cpuset" ]] || return 0
+  if ucs_docker_wait_update_cpuset "$METRICS_CONTAINER" METRICS 0 30 0.2; then
+    echo "[metrics_up] cpu affinity container ${METRICS_CONTAINER} = ${metrics_cpuset}"
+  else
+    echo "[metrics_up][WARN] cpu affinity container ${METRICS_CONTAINER} = skipped (docker update failed)" >&2
+  fi
+}
+
 if [[ "$FOREGROUND" -eq 1 ]]; then
   trap cleanup INT TERM EXIT
 
@@ -597,6 +609,7 @@ if [[ "$FOREGROUND" -eq 1 ]]; then
   "${WORKER_RUN_CMD[@]}" &
   WORKER_PID=$!
   echo "$WORKER_PID" > "$PIDFILE"
+  apply_metrics_cpuset
   wait "$WORKER_PID"
 else
   echo "[metrics_up] starting worker in background ..."
@@ -607,6 +620,7 @@ else
   fi
   WORKER_PID=$!
   echo "$WORKER_PID" > "$PIDFILE"
+  apply_metrics_cpuset
   echo "[metrics_up] pid=${WORKER_PID}"
   echo "[metrics_up] log=${LOGFILE}"
 fi

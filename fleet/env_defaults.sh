@@ -303,6 +303,30 @@ ucs_docker_update_cpuset() {
   docker update --cpuset-cpus "$cpuset" "$container" >/dev/null
 }
 
+ucs_docker_wait_update_cpuset() {
+  local container="$1"
+  local role="$2"
+  local idx="${3:-}"
+  local attempts="${4:-30}"
+  local delay="${5:-0.2}"
+  local cpuset=""
+  local state=""
+  local i
+
+  cpuset="$(ucs_cpu_set "$role" "$idx" 2>/dev/null || true)"
+  [[ -n "$cpuset" ]] || return 0
+
+  for ((i = 1; i <= attempts; ++i)); do
+    state="$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null || true)"
+    if [[ "$state" == "true" ]]; then
+      docker update --cpuset-cpus "$cpuset" "$container" >/dev/null
+      return 0
+    fi
+    sleep "$delay"
+  done
+  return 1
+}
+
 export UCS_MESH_DIR UCS_SCRIPTS_ROOT UCS_ROOT UCS_WORKSPACE_ROOT
 export PX4_DIR NS3_DIR GZ_ENV_SH PX4_GZ_MODELS PX4_GZ_WORLDS
 export UCS_VENV_DIR PYTHON_BIN

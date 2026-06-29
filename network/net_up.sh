@@ -898,6 +898,15 @@ start_host_gs_bmv2() {
     echo "[ns3_live_up][ERR] failed to start GS BMv2 edge container: ${GS_BMV2_CONTAINER}" >&2
     return 1
   fi
+  local gs_cpuset
+  gs_cpuset="$(ucs_cpu_set GS_BMV2 0 2>/dev/null || true)"
+  if [[ -n "$gs_cpuset" ]]; then
+    if ucs_docker_wait_update_cpuset "$GS_BMV2_CONTAINER" GS_BMV2 0 10 0.2; then
+      log "cpu affinity container ${GS_BMV2_CONTAINER} = ${gs_cpuset}"
+    else
+      log "cpu affinity container ${GS_BMV2_CONTAINER} = skipped (docker update failed)"
+    fi
+  fi
 
   log "started host GS BMv2 edge: container=${GS_BMV2_CONTAINER} device=${GS_P4_DEVICE_ID} grpc=${GS_P4_GRPC_ADDR} ports=${BMV2_LOCAL_PORT}:${GS_LOCAL_IF},${BMV2_AIR_PORT}:${GS_AIR_IF}"
 }
