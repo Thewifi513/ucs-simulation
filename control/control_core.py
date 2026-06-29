@@ -267,6 +267,8 @@ class ControlCore:
         self.command_lock = asyncio.Lock()
         self.arm_offboard_task: Optional[asyncio.Task] = None
         self.last_arm_request_wall = 0.0
+        self.ever_offboard_active = False
+        self.last_offboard_active_wall = 0.0
         self.telemetry_tasks: list[asyncio.Task] = []
         self.background_tasks: list[asyncio.Task] = []
         self.control_trace = CsvTraceWriter(args.control_trace_path, [
@@ -379,6 +381,8 @@ class ControlCore:
         if key in HOLD_KEYS:
             self.keys[key] = action == "press"
             self.state.last_event = f"{action}:{key}"
+            if action == "press":
+                await self.maybe_auto_recover_offboard(f"key:{key}")
             return
         if action != "press":
             return
@@ -468,6 +472,16 @@ class ControlCore:
     def vehicle_link_active(self) -> bool:
         return self.state.connected or (time.time() - self.last_telemetry_wall) < 3.0
 
+    def mark_offboard_active(self) -> None:
+        self.ever_offboard_active = True
+        self.last_offboard_active_wall = time.time()
+
+    def recent_offboard_session(self) -> bool:
+        if not self.ever_offboard_active:
+            return False
+        window = max(0.0, self.args.auto_recover_offboard_window_sec)
+        return window <= 0.0 or (time.time() - self.last_offboard_active_wall) <= window
+
     @staticmethod
     def is_timeout_error(exc: Exception) -> bool:
         text = f"{type(exc).__name__}: {exc}".lower()
@@ -501,6 +515,18 @@ class ControlCore:
     def _arm_offboard_task_done(self, task: asyncio.Task) -> None:
         if self.arm_offboard_task is task:
             self.arm_offboard_task = None
+
+    async def maybe_auto_recover_offboard(self, source: str) -> None:
+        if not self.args.auto_recover_offboard:
+            return
+        if self.state.offboard_active:
+            return
+        if not self.recent_offboard_session():
+            return
+        if not self.vehicle_link_active():
+            return
+        await self.log(f"[offboard] auto-recover requested by {source}", event="offboard_auto_recover")
+        await self.request_arm_offboard(f"auto_recover:{source}")
 
     async def px4_param_float(self, name: str) -> Optional[float]:
         try:
@@ -555,6 +581,7 @@ class ControlCore:
             self.state.in_air = value
             if not value and self.state.offboard_active:
                 self.state.offboard_active = False
+                await self.log("[offboard] inactive because vehicle is no longer in air", event="offboard_in_air_lost")
 
     async def telemetry_watch_position(self) -> None:
         async for pos in self.drone.telemetry.position():
@@ -738,6 +765,7 @@ class ControlCore:
                 await self.prime_offboard_setpoints()
                 await self.drone.offboard.start()
                 self.state.offboard_active = True
+                self.mark_offboard_active()
                 await self.log("[offboard] started", event="offboard_started")
                 return True
             except Exception as exc:
@@ -835,6 +863,7 @@ class ControlCore:
                     await self.drone.offboard.set_velocity_body(
                         VelocityBodyYawspeed(self.state.vx, self.state.vy, self.state.vz, self.emitted_yawrate())
                     )
+                    self.mark_offboard_active()
                     self.write_control_trace(kind="setpoint", event="emit")
                 except Exception as exc:
                     self.state.offboard_active = False
@@ -913,6 +942,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--offboard-retry-delay-sec", type=float, default=0.7)
     parser.add_argument("--arm-command-cooldown-sec", type=float, default=2.0)
     parser.add_argument("--offboard-loss-timeout-sec", type=float, default=5.0)
+    parser.add_argument("--auto-recover-offboard", dest="auto_recover_offboard", action="store_true", default=True)
+    parser.add_argument("--no-auto-recover-offboard", dest="auto_recover_offboard", action="store_false")
+    parser.add_argument("--auto-recover-offboard-window-sec", type=float, default=300.0)
     parser.add_argument("--control-period-sec", type=float, default=0.10)
     parser.add_argument("--status-period-sec", type=float, default=0.20)
     parser.add_argument("--control-trace-path", default="")

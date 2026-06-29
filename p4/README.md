@@ -62,7 +62,7 @@ build/ucs_edge_cluster_route.p4info.txt   已编译 P4Info
 ```bash
 ./p4/adaptive_route_monitor.sh \
   --topology ./topology/wifi_adhoc_matrix_2x3_6uav.json \
-  --interval-sec 5
+  --interval-sec 1
 ```
 
 ## 运行产物
