@@ -46,6 +46,7 @@ VIDEO_ENCODER="${VIDEO_ENCODER:-auto}"
 DASHBOARD_VIDEO_DECODER_EXPLICIT=0
 [[ -n "${DASHBOARD_VIDEO_DECODER:-}" ]] && DASHBOARD_VIDEO_DECODER_EXPLICIT=1
 DASHBOARD_VIDEO_SENDER_IDLE_SEC="${DASHBOARD_VIDEO_SENDER_IDLE_SEC:-45}"
+DASHBOARD_VIDEO_PREWARM_SUBSTREAMS="${DASHBOARD_VIDEO_PREWARM_SUBSTREAMS:-1}"
 DASHBOARD_MODE="${UCS_MESH_DASHBOARD_MODE:-auto}"
 DASHBOARD_HOST="${DASHBOARD_HOST:-0.0.0.0}"
 DASHBOARD_PORT="${DASHBOARD_PORT:-8088}"
@@ -1019,6 +1020,14 @@ start_dashboard() {
       --video-sender-idle-sec "$DASHBOARD_VIDEO_SENDER_IDLE_SEC"
       --video-sender-run-dir "${RTP_RUN_DIR}/on-demand"
     )
+    case "$DASHBOARD_VIDEO_PREWARM_SUBSTREAMS" in
+      1|true|True|TRUE|yes|Yes|YES|on|On|ON)
+        dashboard_args+=(--video-prewarm-substreams)
+        ;;
+      *)
+        dashboard_args+=(--no-video-prewarm-substreams)
+        ;;
+    esac
   fi
   local dashboard_cmd=()
   with_taskset_cmd DASHBOARD 0 dashboard_cmd "${dashboard_args[@]}"

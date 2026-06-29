@@ -1073,6 +1073,7 @@ class OnDemandVideoSender:
         self.run_dir = run_dir
         self.proc: Optional[subprocess.Popen] = None
         self.external = False
+        self.pinned = False
         self.started_at = 0.0
         self.last_client_at = time.monotonic()
         self.last_error = ""
@@ -1183,6 +1184,7 @@ class OnDemandVideoSender:
             "port": self.port,
             "running": self.is_running(),
             "external": self.external,
+            "pinned": self.pinned,
             "pid": None if proc is None else proc.pid,
             "idle_s": max(0.0, now - self.last_client_at),
             "started_s": None if not self.started_at else max(0.0, now - self.started_at),
@@ -1247,6 +1249,8 @@ class OnDemandVideoSenderManager:
                     idle_for = now - sender.last_client_at
                     if not sender.is_running():
                         stale.append((key, sender))
+                    elif sender.pinned:
+                        continue
                     elif idle_for > self.idle_sec:
                         stale.append((key, sender))
                 for key, _sender in stale:
@@ -1257,6 +1261,36 @@ class OnDemandVideoSenderManager:
     def mark_active(self, sender: Optional[OnDemandVideoSender]) -> None:
         if sender is not None:
             sender.mark_client_active()
+
+    def prewarm_substreams(self) -> None:
+        if not self.enabled:
+            return
+
+        def runner() -> None:
+            try:
+                topo = read_json(self.topology_path)
+                uav_ids = [
+                    str(item.get("id"))
+                    for item in topo.get("instances", [])
+                    if item.get("type") == "uav" and item.get("id")
+                ]
+                for uav_id in uav_ids:
+                    try:
+                        _address, resolved_uav, port, stream_key = resolve_video_request(self.topology_path, uav_id, "sub")
+                        sender = self.ensure(resolved_uav, stream_key, port)
+                        if sender is not None:
+                            sender.pinned = True
+                        print(
+                            f"[dashboard] prewarmed substream sender {resolved_uav}/{stream_key} port={port}",
+                            flush=True,
+                        )
+                    except Exception as exc:
+                        print(f"[dashboard][WARN] prewarm substream {uav_id} failed: {exc}", flush=True)
+                    time.sleep(0.25)
+            except Exception as exc:
+                print(f"[dashboard][WARN] prewarm substreams failed: {exc}", flush=True)
+
+        threading.Thread(target=runner, name="video-substream-prewarm", daemon=True).start()
 
     def snapshot(self) -> List[Dict[str, Any]]:
         now = time.monotonic()
@@ -1815,6 +1849,7 @@ class DashboardHTTPServer(ThreadingHTTPServer):
         video_udp_buffer_bytes: int,
         video_decoder: str,
         video_on_demand: bool,
+        video_prewarm_substreams: bool,
         video_sender_idle_sec: float,
         video_sender_encoder: str,
         video_sender_run_dir: Path,
@@ -1834,6 +1869,9 @@ class DashboardHTTPServer(ThreadingHTTPServer):
             idle_sec=video_sender_idle_sec,
             run_dir=video_sender_run_dir,
         )
+        self.video_prewarm_substreams = video_prewarm_substreams
+        if self.video_prewarm_substreams:
+            self.video_sender_manager.prewarm_substreams()
         super().__init__(server_address, handler_class)
 
     def server_close(self) -> None:
@@ -1858,14 +1896,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--video-jitter-latency-ms",
         type=int,
-        default=parse_int(os.environ.get("DASHBOARD_VIDEO_JITTER_LATENCY_MS"), 800),
-        help="Dashboard RTP jitter-buffer latency in ms. Default: 800",
+        default=parse_int(os.environ.get("DASHBOARD_VIDEO_JITTER_LATENCY_MS"), 120),
+        help="Dashboard RTP jitter-buffer latency in ms. Default: 120",
     )
     parser.add_argument(
         "--video-drop-on-latency",
         action=argparse.BooleanOptionalAction,
-        default=parse_bool(os.environ.get("DASHBOARD_VIDEO_DROP_ON_LATENCY"), False),
-        help="Drop RTP packets when the jitter buffer exceeds latency. Default: false",
+        default=parse_bool(os.environ.get("DASHBOARD_VIDEO_DROP_ON_LATENCY"), True),
+        help="Drop RTP packets when the jitter buffer exceeds latency. Default: true",
     )
     parser.add_argument(
         "--video-udp-buffer-bytes",
@@ -1887,6 +1925,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=parse_bool(os.environ.get("DASHBOARD_VIDEO_ON_DEMAND"), False),
         help="Start RTP camera senders only when /video/<uav>.mjpg is requested. Default: false",
+    )
+    parser.add_argument(
+        "--video-prewarm-substreams",
+        action=argparse.BooleanOptionalAction,
+        default=parse_bool(os.environ.get("DASHBOARD_VIDEO_PREWARM_SUBSTREAMS"), False),
+        help="When on-demand mode is enabled, start all preview substream senders in the background. Default: false",
     )
     parser.add_argument(
         "--video-sender-idle-sec",
@@ -1929,6 +1973,7 @@ def main() -> int:
         video_udp_buffer_bytes=args.video_udp_buffer_bytes,
         video_decoder=args.video_decoder,
         video_on_demand=args.video_on_demand,
+        video_prewarm_substreams=args.video_prewarm_substreams,
         video_sender_idle_sec=args.video_sender_idle_sec,
         video_sender_encoder=args.video_sender_encoder,
         video_sender_run_dir=Path(args.video_sender_run_dir).expanduser().resolve(),
@@ -1947,6 +1992,7 @@ def main() -> int:
     print(
         "[dashboard] video_on_demand="
         f"{httpd.video_sender_manager.enabled} "
+        f"prewarm_substreams={httpd.video_prewarm_substreams} "
         f"sender_encoder={httpd.video_sender_manager.encoder} "
         f"sender_idle_sec={httpd.video_sender_manager.idle_sec:g} "
         f"sender_run_dir={httpd.video_sender_manager.run_dir}",

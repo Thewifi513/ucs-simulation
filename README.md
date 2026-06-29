@@ -190,7 +190,7 @@ Gazebo camera topic -> rtp_camera_bridge.py -> RTP/H.264 UDP -> GS
 主流:        5700 + UAV idx, 1920x1080, 30fps, 8000kbps
 ```
 
-`fleet_up.sh` 默认启动所有 UAV 的 540p 子流。1080p 主流是显式开关，因为六架无人机同时双流会产生 12 路 H.264 编码，可能超过当前 GPU 的 NVENC 并发能力：
+`fleet_up.sh` 默认启动所有 UAV 的 540p 子流。使用 `--video-on-demand` 时，dashboard 默认预热全部 540p 子流发送端，切换预览不需要重新启动 Gazebo -> RTP helper；1080p 主流仍按请求启动。若要让子流发送端也完全按需启动，可设置 `DASHBOARD_VIDEO_PREWARM_SUBSTREAMS=0`。1080p 主流是显式开关，因为六架无人机同时双流会产生 12 路 H.264 编码，可能超过当前 GPU 的 NVENC 并发能力：
 
 ```bash
 UCS_MESH_VIDEO_MAIN_MODE=on ./fleet/fleet_up.sh --headless

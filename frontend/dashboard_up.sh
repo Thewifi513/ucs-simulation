@@ -15,6 +15,7 @@ CONTROL_WS="${CONTROL_WS:-}"
 CONTROL_PROTOCOL="${CONTROL_PROTOCOL:-relay}"
 DASHBOARD_VIDEO_DECODER="${DASHBOARD_VIDEO_DECODER:-auto}"
 DASHBOARD_VIDEO_ON_DEMAND="${DASHBOARD_VIDEO_ON_DEMAND:-0}"
+DASHBOARD_VIDEO_PREWARM_SUBSTREAMS="${DASHBOARD_VIDEO_PREWARM_SUBSTREAMS:-0}"
 DASHBOARD_VIDEO_SENDER_IDLE_SEC="${DASHBOARD_VIDEO_SENDER_IDLE_SEC:-45}"
 DASHBOARD_VIDEO_SENDER_ENCODER="${DASHBOARD_VIDEO_SENDER_ENCODER:-${VIDEO_ENCODER:-auto}}"
 DASHBOARD_VIDEO_SENDER_RUN_DIR="${DASHBOARD_VIDEO_SENDER_RUN_DIR:-}"
@@ -33,6 +34,9 @@ Options:
                               avdec_h264. Default: ${DASHBOARD_VIDEO_DECODER}
   --video-on-demand           Start RTP camera senders only when a video stream is requested.
   --no-video-on-demand        Keep using pre-started RTP camera senders.
+  --video-prewarm-substreams  In on-demand mode, start all preview substream senders in the background.
+  --no-video-prewarm-substreams
+                              Do not prewarm preview substream senders.
   --video-sender-idle-sec N   Stop on-demand senders after N idle seconds.
                               Default: ${DASHBOARD_VIDEO_SENDER_IDLE_SEC}
   --video-sender-encoder NAME Encoder for on-demand senders. Default: ${DASHBOARD_VIDEO_SENDER_ENCODER}
@@ -79,6 +83,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-video-on-demand)
       DASHBOARD_VIDEO_ON_DEMAND=0
+      shift
+      ;;
+    --video-prewarm-substreams)
+      DASHBOARD_VIDEO_PREWARM_SUBSTREAMS=1
+      shift
+      ;;
+    --no-video-prewarm-substreams)
+      DASHBOARD_VIDEO_PREWARM_SUBSTREAMS=0
       shift
       ;;
     --video-sender-idle-sec)
@@ -136,6 +148,14 @@ case "$DASHBOARD_VIDEO_ON_DEMAND" in
     args+=(--no-video-on-demand)
     ;;
 esac
+case "$DASHBOARD_VIDEO_PREWARM_SUBSTREAMS" in
+  1|true|True|TRUE|yes|Yes|YES|on|On|ON)
+    args+=(--video-prewarm-substreams)
+    ;;
+  *)
+    args+=(--no-video-prewarm-substreams)
+    ;;
+esac
 if [[ -n "$CONTROL_WS" ]]; then
   args+=(--control-ws "$CONTROL_WS")
 fi
@@ -146,4 +166,5 @@ fi
 echo "[dashboard_up] topology=${TOPOLOGY_FILE}"
 echo "[dashboard_up] url=http://127.0.0.1:${PORT}"
 echo "[dashboard_up] video_on_demand=${DASHBOARD_VIDEO_ON_DEMAND}"
+echo "[dashboard_up] video_prewarm_substreams=${DASHBOARD_VIDEO_PREWARM_SUBSTREAMS}"
 exec "${args[@]}"

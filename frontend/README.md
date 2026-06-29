@@ -53,6 +53,8 @@ http://127.0.0.1:8088/video/uav04.mjpg?stream=sub&w=960&h=540&q=75
 
 - `/api/state` 是前端和外部观测工具的主要状态接口。
 - `/video/<uav>.mjpg` 是当前浏览器视频代理接口，可通过 `stream=sub|main` 选择子流或主流。
+- on-demand 视频模式下，`--video-prewarm-substreams` 只预热 540p 子流发送端；1080p 主流仍在请求 `stream=main` 时启动。
+- dashboard RTP 接收端默认使用 120ms jitter buffer，并在超过延迟时丢包，优先降低切换和故障恢复时的可见等待。
 - 控制面板默认读取每架 UAV 的 control runtime，切换 UAV 时应切换对应 relay/core/MAVSDK 端口。
 - 后续 debug 工具接入前端时，建议新增只读 API 读取 `debug/` 输出，不让前端直接执行高权限命令。
 - 前端只做展示和轻控制，不应承担网络、PX4、P4 的启动逻辑。
