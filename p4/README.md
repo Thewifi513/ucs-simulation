@@ -9,8 +9,9 @@ ucs_edge_cluster_route.p4                 当前 P4 源程序
 compile.sh                                使用固定 Docker 编译 P4，生成 BMv2 JSON 和 P4Info
 load_pipeline_observation.sh              通过观测网给 GS/UAV BMv2 加载 pipeline 和表项
 apply_cluster_heads.sh                    运行中更新 cluster-head 路由表项
+apply_adaptive_routes.sh                  运行中更新 adaptive_prior 路由表项
 runtime_set_pipeline.py                   P4Runtime set_pipeline_config 工具
-cluster_head_entries.py                   根据拓扑生成 cluster-head P4Runtime 表项
+cluster_head_entries.py                   根据拓扑生成 cluster_heads/adaptive_prior P4Runtime 表项
 build/ucs_edge_cluster_route.json         已编译 BMv2 JSON
 build/ucs_edge_cluster_route.p4info.txt   已编译 P4Info
 ```
@@ -49,6 +50,13 @@ build/ucs_edge_cluster_route.p4info.txt   已编译 P4Info
   --cluster-heads 1:uav01,2:uav04
 ```
 
+运行中切换为组内自选路：
+
+```bash
+./p4/apply_adaptive_routes.sh \
+  --topology ./topology/wifi_adhoc_matrix_2x3_6uav.json
+```
+
 ## 运行产物
 
 ```text
@@ -64,5 +72,6 @@ p4/build/p4runtime_entries/*.json   live 加载时临时生成，可删除
 - 新 P4 表或 action 应先扩展 `ucs_edge_cluster_route.p4`，再扩展 `cluster_head_entries.py` 的表项生成逻辑。
 - `load_pipeline_observation.sh --target` 是单设备调试入口。
 - `--cluster-heads 1:uav01,2:uav04` 是当前 cluster-head 策略的外部控制接口。
+- `programmable_net.routing.mode=adaptive_prior` 会按 GS-UAV 边和同 cluster UAV-UAV 边计算最短代价下一跳；边权优先读取 `routing_cost`、`prior_cost`、`prior_loss`、`delay_ms` 等显式先验字段，缺省时用位置距离和障碍物损伤估算。
 - `--compile` 可用于开发机自动重编译；服务器建议保持 `--no-compile` 和固定产物。
 - 新 BMv2 目标应先在拓扑 `programmable_net` 中声明 device id、grpc 地址和端口映射。

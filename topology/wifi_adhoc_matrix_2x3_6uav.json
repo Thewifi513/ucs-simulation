@@ -347,7 +347,7 @@
       "p4info": "p4/build/ucs_edge_cluster_route.p4info.txt"
     },
     "routing": {
-      "mode": "cluster_heads",
+      "mode": "adaptive_prior",
       "cluster_heads": {
         "1": "uav01",
         "2": "uav04"

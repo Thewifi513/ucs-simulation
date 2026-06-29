@@ -92,7 +92,12 @@ GS host traffic on gs0
   ns-3 pairwise L2 fabric
 ```
 
-cluster-head 默认规则：
+`programmable_net.routing.mode` supports `cluster_heads` and `adaptive_prior`.
+`adaptive_prior` keeps the cluster split, allows GS-UAV edges plus same-cluster
+UAV-UAV edges, and picks the lowest-cost next hop from prior link cost/loss
+fields or the configured distance/obstruction model.
+
+cluster-head 固定模式规则：
 
 ```text
 cluster 1 -> uav01

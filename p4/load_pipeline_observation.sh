@@ -16,6 +16,7 @@ P4INFO_OVERRIDE=""
 TARGET_FILTER=""
 INCLUDE_GS=0
 INSTALL_CLUSTER_HEAD_ROUTES=0
+ROUTING_MODE="${UCS_MESH_ROUTING_MODE:-}"
 CLUSTER_HEADS="${UCS_MESH_CLUSTER_HEADS:-}"
 if [[ -n "${UCS_MESH_GS_APP_IF+x}" ]]; then
   GS_APP_IF="$UCS_MESH_GS_APP_IF"
@@ -47,7 +48,9 @@ Options:
   --gs-app-if IFACE     Host GS app-facing interface for route MACs. Default: topology gs_edge.app_if or gs0
   --gs-device-id ID     P4Runtime device id for the GS edge. Default: 100
   --gs-grpc-addr ADDR   P4Runtime address for the GS edge. Default: 127.0.0.1:9560
-  --cluster-head-routes Install BMv2 table entries for cluster-head routing
+  --routing-entries     Install BMv2 route table entries from programmable_net.routing.mode
+  --routing-mode MODE   Route entry mode: cluster_heads or adaptive_prior. Default: topology routing.mode
+  --cluster-head-routes Backward-compatible alias for --routing-entries
   --cluster-heads MAP   Cluster head map, e.g. 1:uav01,2:uav04
   --p4runtime-image IMG P4Runtime shell image. Default: ucs-p4runtime-sh:20260625
   --compile             Compile missing/stale P4 artifacts before loading
@@ -123,6 +126,15 @@ while [[ $# -gt 0 ]]; do
     --cluster-head-routes)
       INSTALL_CLUSTER_HEAD_ROUTES=1
       shift
+      ;;
+    --routing-entries)
+      INSTALL_CLUSTER_HEAD_ROUTES=1
+      shift
+      ;;
+    --routing-mode)
+      ROUTING_MODE="${2:-}"
+      [[ -n "$ROUTING_MODE" ]] || die "--routing-mode requires a mode"
+      shift 2
       ;;
     --cluster-heads)
       CLUSTER_HEADS="${2:-}"
@@ -409,6 +421,7 @@ load_one() {
       --topology "$TOPOLOGY_FILE" \
       --target-id "$uav_id" \
       --output "$entries_abs" \
+      --routing-mode "$ROUTING_MODE" \
       --cluster-heads "$CLUSTER_HEADS" \
       --gs-app-if "$GS_APP_IF"
     entries_rel="$(repo_rel_path "$entries_abs")"
@@ -453,7 +466,7 @@ log "pipeline artifacts:"
 log "  json=${BMV2_JSON_ABS}"
 log "  p4info=${P4INFO_ABS}"
 if [[ "$INSTALL_CLUSTER_HEAD_ROUTES" -eq 1 ]]; then
-  log "cluster-head route gs-app-if=${GS_APP_IF}"
+  log "route entries mode=${ROUTING_MODE:-topology} gs-app-if=${GS_APP_IF}"
 fi
 log "loading via observation network using ${P4RUNTIME_IMAGE}"
 

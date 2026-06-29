@@ -149,6 +149,63 @@ def read_text(path: Path) -> Optional[str]:
         return None
 
 
+def read_p4_route_state(topology_path: Path) -> Dict[str, Any]:
+    entries_dir = topology_path.parent.parent / "p4" / "build" / "p4runtime_entries"
+    result: Dict[str, Any] = {
+        "entries_dir": str(entries_dir),
+        "mode": "",
+        "routes": {},
+        "link_costs": [],
+        "files": [],
+    }
+    if not entries_dir.is_dir():
+        return result
+
+    modes = set()
+    routes: Dict[str, Dict[str, List[str]]] = {}
+    costs_by_id: Dict[str, Dict[str, Any]] = {}
+    files: List[Dict[str, Any]] = []
+    for path in sorted(entries_dir.glob("*.json")):
+        try:
+            payload = read_json(path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        mode = str(payload.get("mode", ""))
+        if mode:
+            modes.add(mode)
+        target_id = str(payload.get("target_id", path.stem))
+        files.append(
+            {
+                "target_id": target_id,
+                "mode": mode,
+                "path": str(path),
+                "mtime": path.stat().st_mtime,
+            }
+        )
+
+        route_payload = payload.get("routes", {})
+        if isinstance(route_payload, dict):
+            for src, dst_map in route_payload.items():
+                if not isinstance(dst_map, dict):
+                    continue
+                src_routes = routes.setdefault(str(src), {})
+                for dst, path_value in dst_map.items():
+                    if isinstance(path_value, list):
+                        src_routes[str(dst)] = [str(item) for item in path_value]
+
+        for item in payload.get("link_costs", []):
+            if not isinstance(item, dict):
+                continue
+            cost_id = str(item.get("id") or f"{item.get('src', '')}-{item.get('dst', '')}")
+            costs_by_id[cost_id] = item
+
+    result["mode"] = next(iter(modes)) if len(modes) == 1 else ("mixed" if modes else "")
+    result["routes"] = routes
+    result["link_costs"] = list(costs_by_id.values())
+    result["files"] = files
+    return result
+
+
 def newest_existing(paths: Iterable[str]) -> Optional[str]:
     files = [p for p in paths if os.path.isfile(p)]
     if not files:
@@ -765,6 +822,7 @@ def build_state(topology_path: Path) -> Dict[str, Any]:
     gs_id = globals_.get("gs_id", "gs")
     programmable = topo.get("programmable_net", globals_.get("programmable_net", {}))
     programmable_routing = programmable.get("routing", {}) if isinstance(programmable, dict) else {}
+    programmable_route_state = read_p4_route_state(topology_path)
     gs = next((inst for inst in instances if inst.get("id") == gs_id), None)
     gs_ip = ""
     if gs:
@@ -946,6 +1004,7 @@ def build_state(topology_path: Path) -> Dict[str, Any]:
             "impairment_policy": impairment_policy,
             "link_simulation": link_sim,
             "programmable_routing": programmable_routing,
+            "programmable_route_state": programmable_route_state,
             "payload": globals_.get("payload", {}),
             "video": video,
             "video_flows": [

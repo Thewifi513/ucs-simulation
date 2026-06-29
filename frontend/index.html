@@ -1562,7 +1562,19 @@
       return [String(a), String(b)].sort().join('::');
     }
 
+    function routingMode() {
+      return String(state?.topology?.programmable_route_state?.mode
+        || state?.topology?.programmable_routing?.mode
+        || '');
+    }
+
+    function usesFixedClusterHeads() {
+      const mode = routingMode();
+      return !mode || mode === 'cluster_heads' || mode === 'cluster_head_routes';
+    }
+
     function clusterHeadMap() {
+      if (!usesFixedClusterHeads()) return new Map();
       const configured = state?.topology?.programmable_routing?.cluster_heads || {};
       const heads = new Map();
       Object.entries(configured).forEach(([clusterId, uavId]) => {
@@ -1604,11 +1616,36 @@
       return Boolean(src?.position && dst?.position && (isGroundToUav(src, dst) || isIntraClusterUav(src, dst)));
     }
 
+    function routeKeysFromPath(path) {
+      const keys = new Set();
+      if (!Array.isArray(path)) return keys;
+      for (let i = 0; i + 1 < path.length; i += 1) {
+        if (nodeById(path[i]) && nodeById(path[i + 1])) {
+          keys.add(pairKey(path[i], path[i + 1]));
+        }
+      }
+      return keys;
+    }
+
+    function runtimeRoutePath(targetUav = selectedUav) {
+      const selected = nodeById(targetUav);
+      const gs = (state?.nodes || []).find((node) => node.type === 'ground_station');
+      const routes = state?.topology?.programmable_route_state?.routes || {};
+      if (!selected || selected.type !== 'uav' || !gs) return [];
+      const uplink = routes?.[selected.id]?.[gs.id];
+      if (Array.isArray(uplink) && uplink.length >= 2) return uplink;
+      const downlink = routes?.[gs.id]?.[selected.id];
+      if (Array.isArray(downlink) && downlink.length >= 2) return downlink;
+      return [];
+    }
+
     function activeRouteKeys(targetUav = selectedUav) {
       const selected = nodeById(targetUav);
       const gs = (state?.nodes || []).find((node) => node.type === 'ground_station');
       const keys = new Set();
       if (!selected || selected.type !== 'uav' || !gs) return keys;
+      const runtimeKeys = routeKeysFromPath(runtimeRoutePath(targetUav));
+      if (runtimeKeys.size > 0) return runtimeKeys;
       const headId = clusterHeadFor(selected) || selected.id;
       if (headId && nodeById(headId)) {
         keys.add(pairKey(gs.id, headId));

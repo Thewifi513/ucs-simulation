@@ -320,10 +320,24 @@ bmv2_cpu_port = int(os.environ.get("UCS_MESH_BMV2_CPU_PORT", cpu_port_cfg.get("p
 programmable_routing = programmable_net.get("routing", {}) if programmable_net else {}
 if programmable_routing and not isinstance(programmable_routing, dict):
     raise SystemExit("[ns3_live_up][ERR] programmable_net.routing must be an object if present")
-programmable_routing_mode = str(programmable_routing.get("mode", ""))
-p4_cluster_head_routes = programmable_routing_mode in {"cluster_heads", "cluster_head_routes"}
-if programmable_routing.get("cluster_head_routes", False):
+programmable_routing_mode = str(programmable_routing.get("mode", "")).strip()
+p4_route_entry_modes = {
+    "cluster_heads",
+    "cluster_head_routes",
+    "adaptive",
+    "adaptive_prior",
+    "adaptive_prior_loss",
+    "prior_adaptive",
+}
+if programmable_routing_mode and programmable_routing_mode not in p4_route_entry_modes:
+    raise SystemExit(
+        f"[ns3_live_up][ERR] unsupported programmable_net.routing.mode: {programmable_routing_mode}"
+    )
+p4_cluster_head_routes = programmable_routing_mode in p4_route_entry_modes
+if programmable_routing.get("cluster_head_routes", False) or programmable_routing.get("routing_entries", False):
     p4_cluster_head_routes = True
+if p4_cluster_head_routes and not programmable_routing_mode:
+    programmable_routing_mode = "cluster_heads"
 cluster_heads_cfg = programmable_routing.get("cluster_heads", {})
 if cluster_heads_cfg and not isinstance(cluster_heads_cfg, dict):
     raise SystemExit("[ns3_live_up][ERR] programmable_net.routing.cluster_heads must be an object if present")
@@ -714,7 +728,7 @@ if [[ "$EDGE_DATAPLANE" == "container_bmv2_inline" || "$GS_BMV2_ENABLED" == "1" 
   log "bmv2_ports = local ${BMV2_LOCAL_PORT}@${BMV2_LOCAL_IF}, air ${BMV2_AIR_PORT}@${BMV2_AIR_IF}, cpu ${BMV2_CPU_PORT}"
 fi
 if [[ "$EDGE_DATAPLANE" == "container_bmv2_inline" && "$P4_CLUSTER_HEAD_ROUTES" == "1" ]]; then
-  log "p4_routes = ${P4_ROUTING_MODE} heads=${P4_CLUSTER_HEADS}"
+  log "p4_routes = ${P4_ROUTING_MODE} heads=${P4_CLUSTER_HEADS:-none}"
 fi
 if [[ "$EXPERIMENT_MODE" == "l3_mesh" ]]; then
   log "gs_gateway = $GS_GATEWAY_IP"
@@ -1114,7 +1128,7 @@ run_bmv2_controller_hook() {
       hook_args+=(--include-gs --gs-app-if "$GS_APP_IF" --gs-device-id "$GS_P4_DEVICE_ID" --gs-grpc-addr "$GS_P4_GRPC_ADDR")
     fi
     if [[ "$P4_CLUSTER_HEAD_ROUTES" == "1" ]]; then
-      hook_args+=(--cluster-head-routes)
+      hook_args+=(--routing-entries --routing-mode "$P4_ROUTING_MODE")
       if [[ -n "$P4_CLUSTER_HEADS" ]]; then
         hook_args+=(--cluster-heads "$P4_CLUSTER_HEADS")
       fi

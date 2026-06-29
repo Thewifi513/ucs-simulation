@@ -8,20 +8,18 @@ source "${MESH_DIR}/fleet/env_defaults.sh"
 DEFAULT_TOPOLOGY="${MESH_DIR}/topology/wifi_adhoc_matrix_2x3_6uav.json"
 
 TOPOLOGY_FILE="${TOPOLOGY_FILE:-$DEFAULT_TOPOLOGY}"
-CLUSTER_HEADS="${UCS_MESH_CLUSTER_HEADS:-1:uav01,2:uav04}"
-ROUTING_MODE="cluster_heads"
+ROUTING_MODE="${UCS_MESH_ROUTING_MODE:-adaptive_prior}"
 DRY_RUN=0
 VERBOSE=0
 
 usage() {
   cat <<'USAGE'
 Usage:
-  apply_cluster_heads.sh [options]
+  apply_adaptive_routes.sh [options]
 
 Options:
   --topology FILE       Topology JSON file
-  --routing-mode MODE   Route entry mode. Default: cluster_heads
-  --cluster-heads MAP   Cluster head map. Default: 1:uav01,2:uav04
+  --routing-mode MODE   Route entry mode. Default: adaptive_prior
   --dry-run             Print resolved P4Runtime targets without loading
   --verbose             Print more details
   -h, --help            Show this help
@@ -35,17 +33,12 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --topology)
       TOPOLOGY_FILE="${2:-}"
-      [[ -n "$TOPOLOGY_FILE" ]] || { echo "[p4-cluster][ERR] --topology requires a file" >&2; exit 1; }
-      shift 2
-      ;;
-    --cluster-heads)
-      CLUSTER_HEADS="${2:-}"
-      [[ -n "$CLUSTER_HEADS" ]] || { echo "[p4-cluster][ERR] --cluster-heads requires a map" >&2; exit 1; }
+      [[ -n "$TOPOLOGY_FILE" ]] || { echo "[p4-adaptive][ERR] --topology requires a file" >&2; exit 1; }
       shift 2
       ;;
     --routing-mode)
       ROUTING_MODE="${2:-}"
-      [[ -n "$ROUTING_MODE" ]] || { echo "[p4-cluster][ERR] --routing-mode requires a mode" >&2; exit 1; }
+      [[ -n "$ROUTING_MODE" ]] || { echo "[p4-adaptive][ERR] --routing-mode requires a mode" >&2; exit 1; }
       shift 2
       ;;
     --verbose)
@@ -61,7 +54,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "[p4-cluster][ERR] unknown argument: $1" >&2
+      echo "[p4-adaptive][ERR] unknown argument: $1" >&2
       usage
       exit 1
       ;;
@@ -76,7 +69,6 @@ args=(
   --include-gs
   --routing-entries
   --routing-mode "$ROUTING_MODE"
-  --cluster-heads "$CLUSTER_HEADS"
 )
 
 if [[ "$VERBOSE" -eq 1 ]]; then
