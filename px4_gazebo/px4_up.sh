@@ -257,9 +257,11 @@ if mavlink.exists():
         '\tparam set COM_DLL_EXCEPT "${UCS_BMV2_COM_DLL_EXCEPT:-4}"\n'
         '\tparam set COM_DL_LOSS_T "${UCS_BMV2_COM_DL_LOSS_T:-30}"\n'
         'fi\n'
+        'param set COM_OF_LOSS_T "${UCS_BMV2_COM_OF_LOSS_T:-5}"\n'
+        'param set COM_OBL_RC_ACT "${UCS_BMV2_COM_OBL_RC_ACT:-5}"\n'
     )
     ms = re.sub(
-        rf'\n*{re.escape(failsafe_marker)}\nif \[ "\$\{{UCS_BMV2_DISABLE_GCS_FAILSAFE:-1\}}" = "1" \].*?fi\n',
+        rf'\n*{re.escape(failsafe_marker)}\n.*?(?=\n# GCS link|\Z)',
         '\n',
         ms,
         count=0,
@@ -339,6 +341,7 @@ echo "[C] QGC target: $QGC_TARGET"
 echo "[C] MAVSDK control: enabled=${MAVSDK_CONTROL_ENABLED:-0} local=${MAVSDK_LOCAL_PORT:-} remote=${MAVSDK_REMOTE_IP:-}:${MAVSDK_REMOTE_PORT:-} url=${MAVSDK_URL:-}"
 echo "[C] MAVLink rates: qgc=${QGC_RATE_BYTES_PER_SEC:-20000} offboard=${PX4_DEFAULT_OFFBOARD_RATE_BYTES_PER_SEC:-20000} mavsdk=${MAVSDK_RATE_BYTES_PER_SEC:-20000} B/s"
 echo "[C] GCS datalink failsafe policy: disable=${UCS_BMV2_DISABLE_GCS_FAILSAFE:-1} NAV_DLL_ACT=${UCS_BMV2_NAV_DLL_ACT:-0} COM_DLL_EXCEPT=${UCS_BMV2_COM_DLL_EXCEPT:-4} COM_DL_LOSS_T=${UCS_BMV2_COM_DL_LOSS_T:-30}"
+echo "[C] Offboard failsafe policy: COM_OF_LOSS_T=${UCS_BMV2_COM_OF_LOSS_T:-5} COM_OBL_RC_ACT=${UCS_BMV2_COM_OBL_RC_ACT:-5}"
 
 docker_env_args=(
   -e GZ_PARTITION="$GZ_PARTITION_NAME"
@@ -361,6 +364,8 @@ docker_env_args=(
   -e UCS_BMV2_NAV_DLL_ACT="${UCS_BMV2_NAV_DLL_ACT:-0}"
   -e UCS_BMV2_COM_DLL_EXCEPT="${UCS_BMV2_COM_DLL_EXCEPT:-4}"
   -e UCS_BMV2_COM_DL_LOSS_T="${UCS_BMV2_COM_DL_LOSS_T:-30}"
+  -e UCS_BMV2_COM_OF_LOSS_T="${UCS_BMV2_COM_OF_LOSS_T:-5}"
+  -e UCS_BMV2_COM_OBL_RC_ACT="${UCS_BMV2_COM_OBL_RC_ACT:-5}"
   -e UCS_MESH_PX4_ULOG="${UCS_MESH_PX4_ULOG:-0}"
 )
 

@@ -563,6 +563,30 @@ class ControlCore:
                 event="speed_limits_configured",
             )
 
+    async def apply_offboard_loss_policy(self) -> None:
+        errors = []
+        try:
+            await self.drone.param.set_param_float("COM_OF_LOSS_T", self.args.offboard_loss_timeout_sec)
+        except Exception as exc:
+            errors.append(f"COM_OF_LOSS_T={exc}")
+        try:
+            await self.drone.param.set_param_int("COM_OBL_RC_ACT", int(self.args.offboard_loss_action))
+        except Exception as exc:
+            errors.append(f"COM_OBL_RC_ACT={exc}")
+        if errors:
+            await self.log(
+                f"[warn] offboard loss policy not fully applied: {'; '.join(errors)}",
+                error=True,
+                event="offboard_loss_policy_failed",
+            )
+            return
+        await self.log(
+            "[failsafe] offboard loss policy: "
+            f"timeout={self.args.offboard_loss_timeout_sec:.2f}s "
+            f"action={int(self.args.offboard_loss_action)}",
+            event="offboard_loss_policy_applied",
+        )
+
     async def telemetry_watch_connection(self) -> None:
         async for conn in self.drone.core.connection_state():
             if conn.is_connected:
@@ -676,8 +700,7 @@ class ControlCore:
                     await self.log("[offboard] already active", event="offboard_already_active")
                     return
                 self.state.target_yaw_deg = self.state.yaw_deg
-                with contextlib.suppress(Exception):
-                    await self.drone.param.set_param_float("COM_OF_LOSS_T", self.args.offboard_loss_timeout_sec)
+                await self.apply_offboard_loss_policy()
                 if not await self.arm_and_confirm():
                     return
                 try:
@@ -942,6 +965,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--offboard-retry-delay-sec", type=float, default=0.7)
     parser.add_argument("--arm-command-cooldown-sec", type=float, default=2.0)
     parser.add_argument("--offboard-loss-timeout-sec", type=float, default=5.0)
+    parser.add_argument("--offboard-loss-action", type=int, default=5)
     parser.add_argument("--auto-recover-offboard", dest="auto_recover_offboard", action="store_true", default=True)
     parser.add_argument("--no-auto-recover-offboard", dest="auto_recover_offboard", action="store_false")
     parser.add_argument("--auto-recover-offboard-window-sec", type=float, default=300.0)
